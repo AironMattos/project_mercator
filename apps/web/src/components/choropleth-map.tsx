@@ -2,6 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 
+import type { StyleSpecification } from "@maplibre/maplibre-gl-style-spec";
 import {
   LngLatBounds,
   Map as MaplibreMap,
@@ -9,8 +10,9 @@ import {
   Popup,
   type GeoJSONSource,
 } from "maplibre-gl";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { GeoJsonFeatureCollection, MetricaComercio } from "@/lib/api";
 import { expressaoCorPorSaldo, NEUTRO_SALDO_ZERO } from "@/lib/palette";
 
@@ -20,7 +22,21 @@ type ChoroplethMapProps = {
   onSelecionarTerritorio?: (territorioId: string) => void;
 };
 
-const ESTILO_BASE = "https://demotiles.maplibre.org/style.json";
+// Estilo em branco, sem nenhuma fonte externa - o coroplético não depende
+// de basemap com ruas/rótulos, e depender de um tile server de terceiros
+// (ex.: demotiles.maplibre.org) provou ser frágil atrás de proxy/firewall:
+// falha calada (sem "load", sem polígono nenhum) quando a rede bloqueia.
+const ESTILO_BASE: StyleSpecification = {
+  version: 8,
+  sources: {},
+  layers: [
+    {
+      id: "background",
+      type: "background",
+      paint: { "background-color": "#f9f9f7" },
+    },
+  ],
+};
 const CENTRO_CURITIBA: [number, number] = [-49.2731, -25.4284];
 const FONTE_ID = "territorios";
 const CAMADA_PREENCHIMENTO = "territorios-fill";
@@ -77,6 +93,7 @@ export function ChoroplethMap({
   const mapRef = useRef<MaplibreMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
   const onSelecionarRef = useRef(onSelecionarTerritorio);
+  const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
     onSelecionarRef.current = onSelecionarTerritorio;
@@ -95,6 +112,14 @@ export function ChoroplethMap({
     popupRef.current = new Popup({ closeButton: false, closeOnClick: false });
 
     map.addControl(new NavigationControl({ showCompass: false }), "top-right");
+
+    // Sem isso, uma falha (fonte de dado indisponível, WebGL indisponível
+    // etc.) deixa o mapa em branco sem nenhum aviso - o mesmo princípio de
+    // nunca deixar tela quebrada em silêncio aplicado no resto do produto.
+    map.on("error", (e) => {
+      console.error("MapLibre error:", e.error);
+      setErro(e.error?.message ?? "Erro desconhecido ao carregar o mapa");
+    });
 
     map.on("load", () => {
       const data = featureCollectionComMetricas(territorios, metricas);
@@ -196,5 +221,17 @@ export function ChoroplethMap({
     }
   }, [territorios, metricas]);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return (
+    <div className="relative h-full w-full">
+      <div ref={containerRef} className="h-full w-full" />
+      {erro && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/90 p-6">
+          <Alert variant="destructive" className="max-w-md">
+            <AlertTitle>Não foi possível carregar o mapa</AlertTitle>
+            <AlertDescription>{erro}</AlertDescription>
+          </Alert>
+        </div>
+      )}
+    </div>
+  );
 }

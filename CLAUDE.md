@@ -497,6 +497,21 @@ trabalho futuro condicional, não bloqueia o restante da sequência (7a-7c segue
   clicar num bairro abre o painel com o gráfico de duas linhas (azul/laranja) com legenda, e o
   intervalo personalizado funciona.
 
+**Bug encontrado na checagem visual do checkpoint 7c, corrigido**: o mapa não renderizava nada
+- filtros e legenda apareciam (React), mas a área do MapLibre ficava em branco. Causa: o
+  estilo base do checkpoint 7b (`https://demotiles.maplibre.org/style.json`, ver nota daquele
+  checkpoint) não estava acessível a partir do navegador real do dono (rede/proxy/firewall -
+  respondia 200 do shell deste ambiente, mas não do navegador), e não havia `map.on("error",
+  ...)` nenhum - a falha em buscar o estilo nunca dispara `"load"`, então fonte/camadas nunca
+  são adicionadas, e nada aparece, sem nenhum aviso. Corrigido em duas frentes:
+  `choropleth-map.tsx` agora usa um estilo MapLibre **em branco, embutido no código** (sem
+  nenhuma fonte externa - só uma camada `background` com a cor de fundo do produto), eliminando
+  de vez essa dependência de rede (o coroplético nunca precisou de ruas/rótulos de basemap); e
+  um handler de erro (`map.on("error", ...)`) agora mostra um `Alert` visível por cima do mapa
+  em vez de falhar calado - mesmo princípio de nunca deixar tela quebrada em silêncio que já
+  valia pro resto do produto, só não tinha sido aplicado dentro do próprio MapLibre ainda.
+  `npm run build`/`lint` seguem limpos.
+
 **Deploy (6b/7d) segue adiado por decisão do dono** — tudo roda local por enquanto (ver nota
 acima). **Próximo checkpoint: 7d — deploy do frontend** (Vercel) - também adiado junto com o
 6b; quando o dono decidir retomar, os dois andam juntos (a API precisa estar pública antes do
