@@ -453,10 +453,55 @@ trabalho futuro condicional, não bloqueia o restante da sequência (7a-7c segue
   aberturas tendendo ao azul, bairros com mais fechamentos tendendo ao vermelho, hover
   mostrando popup com o nome do bairro.
 
+### Checkpoint 7c — Painel de detalhe: **concluído**
+
+- `src/lib/periodo.ts` — `intervaloUltimosMeses(meses)` calcula `dataInicio`/`dataFim` a
+  partir do relógio real (mês atual menos N-1 meses até o fim do mês atual), sem hardcode de
+  data. Presets 1/3/6/12 meses.
+- `src/components/detail-panel.tsx` — `Sheet` lateral (shadcn), abre quando um bairro é
+  selecionado no mapa. Busca `/metricas/comercio?territorio_id=...` (com o `categoria_id` e
+  intervalo de data correntes) e desenha a série mensal em Recharts: duas linhas categóricas
+  fixas da seção 4.2 (aberturas azul `#2a78d6`, desaparecimentos laranja `#eb6834`), 2px,
+  `strokeLinecap="round"`, marcadores `r=4` (8px de diâmetro), legenda sempre presente,
+  tooltip com cursor de crosshair. Estados carregando/erro/vazio tratados (bairro sem nenhum
+  evento no período mostra um alerta neutro, não gráfico em branco).
+- `dashboard.tsx` reescrito para separar dado "estável" (território + categoria, um único
+  fetch) de dado "dependente de filtro" (métrica do mapa, refeita a cada mudança de categoria
+  ou período - efeito próprio, sem recarregar geometria). Filtros agora ligados de verdade:
+  combobox de categoria (`categoria_id` ou "todas"), presets de período, e um **intervalo
+  customizado** via `Popover` + `Calendar` (`mode="range"`, shadcn) - o requisito da seção 4.2
+  que não tinha entrado em nenhum checkpoint anterior. Clique num bairro no mapa
+  (`onSelecionarTerritorio`, o gancho deixado no checkpoint 7b) resolve o nome do bairro contra
+  o GeoJSON já carregado e abre o painel de detalhe com os mesmos filtros de categoria/período
+  aplicados ao mapa.
+- **Atrito de stack encontrado e resolvido**: os componentes `shadcn/ui` deste projeto usam
+  `@base-ui/react` (não Radix, que é o que a maior parte do conhecimento geral sobre shadcn
+  assume) - `Select.onValueChange` recebe `string | null` (não só `string`), e composição de
+  trigger customizado não usa `asChild`/`Slot` do Radix, usa a prop `render` do Base UI (aqui,
+  resolvido de forma mais simples aplicando `buttonVariants(...)` como `className` direto no
+  `PopoverTrigger`, sem precisar de um `<Button>` filho). Nenhuma decisão de arquitetura
+  mudou por causa disso - é só a API real da lib instalada, diferente da assumida.
+- **Novo lint bloqueante encontrado**: a versão do `eslint-plugin-react-hooks` deste projeto
+  (React Compiler / Next 16) tem a regra `react-hooks/set-state-in-effect`, que reclama do
+  padrão comum "seta `status: carregando` no início do efeito, antes do fetch". É o padrão
+  correto para mostrar um indicador de carregamento num refetch disparado por mudança de
+  filtro - não há como derivar isso do render. Silenciado com
+  `eslint-disable-next-line` pontual nos dois lugares (`dashboard.tsx`, `detail-panel.tsx`),
+  com comentário explicando o motivo.
+- **Rodado localmente**: `npm run build` compila e type-checa sem erro; `npm run lint` sem
+  avisos; confirmado via `curl` que `/metricas/comercio` responde certo para os três casos que
+  o frontend agora dispara (agregado por bairro com filtro de categoria/data, série por bairro
+  com os mesmos filtros, e o payload puro do checkpoint 6a sem filtro nenhum). **Verificação
+  visual novamente não foi feita por mim** - mesma limitação dos checkpoints 7a/7b. Pedir para
+  o dono abrir `http://localhost:3000` e confirmar: trocar categoria/período recolore o mapa,
+  clicar num bairro abre o painel com o gráfico de duas linhas (azul/laranja) com legenda, e o
+  intervalo personalizado funciona.
+
 **Deploy (6b/7d) segue adiado por decisão do dono** — tudo roda local por enquanto (ver nota
-acima). **Próximo checkpoint: 7c — painel de detalhe** (clique no bairro abre um painel
-lateral com série temporal em Recharts; liga os filtros de categoria/período ao mapa e ao
-painel pela primeira vez).
+acima). **Próximo checkpoint: 7d — deploy do frontend** (Vercel) - também adiado junto com o
+6b; quando o dono decidir retomar, os dois andam juntos (a API precisa estar pública antes do
+frontend apontar pra ela em produção). Sem próximo checkpoint pendente localmente: os
+checkpoints 6a, 7a, 7b e 7c (tudo que dá pra fazer sem sair do localhost) estão completos.
 
 ## Notas operacionais
 
