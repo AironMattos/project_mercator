@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Integer, Text
+from sqlalchemy import CheckConstraint, DateTime, Integer, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,7 +20,7 @@ class PipelineRun(Base):
     )
 
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default="gen_random_uuid()"
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
     conector_id: Mapped[str] = mapped_column(Text, nullable=False)
     iniciado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
