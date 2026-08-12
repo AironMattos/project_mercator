@@ -13,7 +13,7 @@ from infrastructure.connectors.base import RawSnapshot
 from infrastructure.connectors.geocuritiba_bairro.geometry import (
     aneis_esri_para_multipolygon,
 )
-from infrastructure.connectors.geocuritiba_bairro.text import slugify
+from infrastructure.connectors.text import slugify
 
 logger = logging.getLogger(__name__)
 
