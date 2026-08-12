@@ -47,17 +47,20 @@ editável) — `apps/api` importará de `src/` como biblioteca quando existir.
   GEOMETRY(MultiPolygon, 4326)`, `territorio_pai_id` (auto-FK), `cidade_id`.
 - `canonical.dim_cnae`, `canonical.dim_categoria`, `canonical.cnae_categoria_map` — **ainda
   não implementados** (checkpoint 4).
-- `events.fato_evento_territorial` — o que foi inferido: `evento_id`, `entity_type`,
-  `event_type`, `entidade_id`, `territorio_id`, `data_evento`, `confianca`
+- `events.fato_evento_territorial` — **implementado**. O que foi inferido: `evento_id`,
+  `entity_type`, `event_type`, `entidade_id`, `territorio_id`, `data_evento`, `confianca`
   (`alta`/`media`/`baixa`), `origem_observacoes UUID[]` (aponta de volta para as
-  observações), `payload JSONB`. **Ainda não implementado.**
+  observações), `payload JSONB`. Constraint extra (adicionada deliberadamente, mesmo padrão
+  de `observacao_entidade`): unique(`entidade_id`, `event_type`, `data_evento`) com
+  `ON CONFLICT DO NOTHING` — reprocessar o mesmo par de snapshots não duplica o mesmo evento.
 - `infra.pipeline_run` — **implementado**. Log de execução de conector: `conector_id`,
   `iniciado_em`/`finalizado_em`, `status` (`sucesso`/`falha`/`parcial`), contadores de
   registros lidos/gravados/com falha.
 
-Catálogo de eventos do Radar de Comércio (checkpoint 3, ainda não implementado):
-`PRIMEIRA_OBSERVACAO`, `ABERTURA_CONFIRMADA`, `DESAPARECIMENTO`, `MUDANCA_CATEGORIA`. Não
-implementar `FECHAMENTO_CONFIRMADO` (depende de uma segunda fonte que ainda não existe).
+Catálogo de eventos do Radar de Comércio (`entity_type = "comercio"`) — **implementado**:
+`PRIMEIRA_OBSERVACAO`, `ABERTURA_CONFIRMADA`, `DESAPARECIMENTO`, `MUDANCA_CATEGORIA`.
+`FECHAMENTO_CONFIRMADO` fica reservado no catálogo (`TIPOS_EVENTO_VALIDOS`), sem regra que o
+gere (depende de uma segunda fonte que ainda não existe).
 
 ## Contrato de conector
 
@@ -166,18 +169,61 @@ exata do `Protocol`, que não é estritamente verificada em runtime.
   resolução de URL do diretório, download em streaming, resolução/não-resolução de bairro,
   linha sem `NUMERO_DO_ALVARA` ignorada. Total do projeto: 41 testes, todos passando.
 
-### Próximo checkpoint: Checkpoint 3 — Detecção de evento
+### Checkpoint 3 — Detecção de evento: **concluído**
 
-- Baixar um segundo snapshot de um mês diferente do já processado (`2026-08-01`) — usar
-  qualquer mês histórico ainda acessível no mirror C3SL/UFPR (`2026-07-01`, `2026-06-01`, etc.
-  já confirmados existentes no diretório).
-- Implementar `src/domain/event/` (regra pura: dado o histórico de observações de uma
-  entidade, qual evento resulta) com teste automatizado para cada `event_type` do catálogo:
-  `PRIMEIRA_OBSERVACAO`, `ABERTURA_CONFIRMADA`, `DESAPARECIMENTO`, `MUDANCA_CATEGORIA`. Não
-  implementar `FECHAMENTO_CONFIRMADO` (depende de segunda fonte que não existe ainda).
-- Implementar `src/pipelines/event_detection/` chamando essa regra sobre os dois snapshots.
-- Confirmar que o volume de `PRIMEIRA_OBSERVACAO`/`DESAPARECIMENTO` é plausível (ordem de
-  grandeza compatível com ~510 mil observações por snapshot) antes de seguir.
+- Segundo snapshot ingerido: `2026-07-01_Alvaras_-_Base_de_Dados.csv` (mesmo mirror
+  C3SL/UFPR), via `python -m pipelines.ingestion.run_alvaras_smf
+  "2026-07-01_Alvaras_-_Base_de_Dados.csv"` — `AlvarasSmfConnector.fetch()` ganhou um
+  parâmetro opcional `nome_arquivo` para buscar um mês histórico específico (por padrão
+  continua resolvendo o mês mais recente) e reaproveita o arquivo local se já baixado.
+- `src/domain/event/models.py` — dataclass `Evento` pura. `TIPOS_EVENTO_VALIDOS` inclui
+  `FECHAMENTO_CONFIRMADO` como valor reservado (validação aceita, nenhuma regra o gera).
+- `src/domain/event/regras.py` — duas funções puras, sem I/O:
+  - `detectar_eventos_par(anterior, atual, entity_type)`: sem `anterior`, decide entre
+    `ABERTURA_CONFIRMADA` (alta) e `PRIMEIRA_OBSERVACAO` (baixa) - **mutuamente exclusivos**;
+    com `anterior`, gera `MUDANCA_CATEGORIA` (media) se o CNAE principal mudou.
+  - `detectar_desaparecimento(ultima_observacao_conhecida, entity_type, data_snapshot_atual)`:
+    constrói o evento a partir da premissa (já estabelecida pelo pipeline, via diferença de
+    conjunto entre os dois snapshots) de que a entidade não aparece mais.
+  - **Interpretação de design que exigiu julgamento** (catálogo original não especifica isso):
+    quando uma entidade aparece pela primeira vez E o `INICIO_ATIVIDADE` cai no período
+    coberto pelo snapshot, emitimos só `ABERTURA_CONFIRMADA` (alta), não as duas — tratado
+    como uma leitura mais específica do mesmo fato, não um evento adicional.
+  - **Achado ao validar contra dado real, corrigido antes de consolidar**: o arquivo é datado
+    no dia 1º do mês (ex.: `2026-08-01`) mas reflete o estado consolidado até o fim do mês
+    ANTERIOR (julho) — confirmado comparando os dois snapshots: entidades que aparecem pela
+    primeira vez no arquivo de agosto têm `INICIO_ATIVIDADE` concentrado em julho, não agosto.
+    A regra de `ABERTURA_CONFIRMADA` compara `INICIO_ATIVIDADE` contra o mês **anterior** ao
+    `observado_em` do snapshot, não o mesmo mês (a primeira versão comparava o mesmo mês e
+    nunca disparava - 0 eventos).
+- `src/infrastructure/database/orm/fato_evento_territorial.py`,
+  `repositories/evento_repository.py` (insert em lote, idempotente).
+  `observacao_repository.iter_grupos_por_entidade`: cursor server-side (`yield_per`) que
+  agrupa por entidade as observações de duas datas, sem carregar os ~500 mil registros de
+  cada snapshot em memória de uma vez.
+- Migração `df04a47294e3` cria `events.fato_evento_territorial`.
+- `src/pipelines/event_detection/run_comercio.py` — orquestra a comparação, grava em lotes
+  de 5000. Uso: `python -m pipelines.event_detection.run_comercio 2026-07-01 2026-08-01`.
+- **Rodado contra dado real** (2026-07-01 vs 2026-08-01, ~515 mil entidades): 6.697 eventos —
+  `DESAPARECIMENTO` 3.757, `ABERTURA_CONFIRMADA` 1.440, `PRIMEIRA_OBSERVACAO` 1.421,
+  `MUDANCA_CATEGORIA` 79. Ordem de grandeza plausível (churn mensal ~0,7%, abertura ~0,3%)
+  frente às ~510 mil observações por snapshot.
+- 16 novos testes automatizados (`tests/domain/event/`) — um por `event_type` implementado,
+  caso de mutualidade exclusiva `ABERTURA_CONFIRMADA`/`PRIMEIRA_OBSERVACAO`, virada de ano,
+  ausência de evento quando CNAE não muda ou está incompleto, validação do domínio `Evento`.
+  Total do projeto: 57 testes, todos passando.
+
+### Próximo checkpoint: Checkpoint 4 — CNAE e categoria
+
+- Implementar `src/commerce/cnae/` (carregar a tabela oficial de CNAE — citar a fonte usada).
+- Implementar `src/commerce/categories/` (mapeamento de CNAE para ~20-30 categorias legíveis —
+  começar com uma lista pequena e explícita).
+- Ligar isso ao `payload` dos eventos de comércio (hoje `MUDANCA_CATEGORIA` grava
+  `cnae_anterior`/`cnae_atual` como códigos crus - ver se vale a pena também resolver a
+  categoria legível ali).
+- Atenção: os CNAEs observados no dado real têm pelo menos dois formatos de exibição
+  diferentes na mesma fonte (ex.: `"5-70.20.00"` vs `"C.26.5.1-5/00-00"`) — normalizar isso é
+  provavelmente pré-requisito para o mapeamento funcionar bem.
 
 ## Notas operacionais
 
