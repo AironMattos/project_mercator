@@ -20,6 +20,11 @@ class MetricaComercioOut(BaseModel):
     saldo: int
 
 
+class CoberturaTemporalOut(BaseModel):
+    mes_inicio: date | None
+    mes_fim: date | None
+
+
 class GeoJsonFeature(BaseModel):
     type: str = "Feature"
     geometry: dict[str, Any] | None

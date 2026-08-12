@@ -6,13 +6,26 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from infrastructure.database.repositories.feature_repository import (
+    consultar_cobertura_temporal,
     consultar_metricas_comercio,
 )
 
 from dependencies import get_db
-from schemas import MetricaComercioOut
+from schemas import CoberturaTemporalOut, MetricaComercioOut
 
 router = APIRouter()
+
+
+@router.get("/metricas/cobertura", response_model=CoberturaTemporalOut)
+def metricas_cobertura(session: Session = Depends(get_db)) -> CoberturaTemporalOut:
+    """Primeiro/último mês com evento real processado - a cobertura de
+    dado de fato, para o cliente não confundir com o range do preset de
+    período selecionado no filtro (ver achado da auditoria de 2026-08-12:
+    "últimos 12 meses" no filtro parecia sugerir 12 meses de atividade
+    real, mas só havia 1 mês de comparação processado).
+    """
+    mes_inicio, mes_fim = consultar_cobertura_temporal(session)
+    return CoberturaTemporalOut(mes_inicio=mes_inicio, mes_fim=mes_fim)
 
 
 @router.get("/metricas/comercio", response_model=list[MetricaComercioOut])

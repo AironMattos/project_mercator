@@ -52,8 +52,20 @@ def consultar_metricas_comercio(
     completa daquele bairro, para o painel de detalhe.
     """
     tabela = ContagemEventosORM
+    # "aberturas" soma PRIMEIRA_OBSERVACAO (confiança baixa) e
+    # ABERTURA_CONFIRMADA (confiança alta) - antes da correção de
+    # 2026-08-12, ABERTURA_CONFIRMADA ficava de fora (nunca chegava a
+    # analytics.contagem_eventos, ver TIPOS_CONSIDERADOS em
+    # analytics/features/contagem_eventos.py), então "aberturas" media só
+    # entidades sem prova de quando abriram.
     aberturas = func.sum(
-        case((tabela.event_type == "PRIMEIRA_OBSERVACAO", tabela.contagem), else_=0)
+        case(
+            (
+                tabela.event_type.in_(("PRIMEIRA_OBSERVACAO", "ABERTURA_CONFIRMADA")),
+                tabela.contagem,
+            ),
+            else_=0,
+        )
     ).label("aberturas")
     desaparecimentos = func.sum(
         case((tabela.event_type == "DESAPARECIMENTO", tabela.contagem), else_=0)
@@ -67,7 +79,9 @@ def consultar_metricas_comercio(
         agrupar_por = (tabela.territorio_id,)
 
     stmt = select(*colunas).where(
-        tabela.event_type.in_(("PRIMEIRA_OBSERVACAO", "DESAPARECIMENTO"))
+        tabela.event_type.in_(
+            ("PRIMEIRA_OBSERVACAO", "ABERTURA_CONFIRMADA", "DESAPARECIMENTO")
+        )
     )
     if territorio_id is not None:
         stmt = stmt.where(tabela.territorio_id == territorio_id)
@@ -92,3 +106,16 @@ def consultar_metricas_comercio(
             }
         )
     return resultado
+
+
+def consultar_cobertura_temporal(session: Session) -> tuple[date | None, date | None]:
+    """Primeiro e último mês com evento em analytics.contagem_eventos -
+    a cobertura real do dado, independente do preset de período escolhido
+    no filtro (ex.: "últimos 12 meses" no filtro não significa que existam
+    12 meses de dado real; essa função é o que informa isso ao cliente).
+    """
+    tabela = ContagemEventosORM
+    linha = session.execute(
+        select(func.min(tabela.mes), func.max(tabela.mes))
+    ).one()
+    return linha[0], linha[1]

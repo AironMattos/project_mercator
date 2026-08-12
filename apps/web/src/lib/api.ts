@@ -37,6 +37,11 @@ export type MetricasComercioFiltros = {
   dataFim?: string;
 };
 
+export type CoberturaTemporal = {
+  mesInicio: string | null;
+  mesFim: string | null;
+};
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 async function fetchJson<T>(
@@ -74,4 +79,14 @@ export function getMetricasComercio(
     data_inicio: filtros.dataInicio,
     data_fim: filtros.dataFim,
   });
+}
+
+// Primeiro/último mês com evento real processado - não confundir com o
+// range do preset de período selecionado no filtro (ver achado da
+// auditoria de 2026-08-12: "últimos 12 meses" no filtro parecia sugerir 12
+// meses de atividade real, mas só havia 1 mês de comparação processado).
+export function getCoberturaTemporal(): Promise<CoberturaTemporal> {
+  return fetchJson<{ mes_inicio: string | null; mes_fim: string | null }>(
+    "/metricas/cobertura",
+  ).then((r) => ({ mesInicio: r.mes_inicio, mesFim: r.mes_fim }));
 }

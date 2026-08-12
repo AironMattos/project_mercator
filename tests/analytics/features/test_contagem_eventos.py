@@ -28,14 +28,16 @@ def test_conta_por_bairro_categoria_mes_e_tipo():
     eventos = [
         _evento("PRIMEIRA_OBSERVACAO", "curitiba-bairro-centro", "bares_restaurantes", date(2026, 8, 1)),
         _evento("PRIMEIRA_OBSERVACAO", "curitiba-bairro-centro", "bares_restaurantes", date(2026, 8, 1)),
+        _evento("ABERTURA_CONFIRMADA", "curitiba-bairro-centro", "bares_restaurantes", date(2026, 8, 1)),
         _evento("DESAPARECIMENTO", "curitiba-bairro-centro", "bares_restaurantes", date(2026, 8, 1)),
     ]
 
     resultado = calcular_contagem_por_bairro_categoria_mes(eventos)
 
-    assert len(resultado) == 2  # dois grupos: PRIMEIRA_OBSERVACAO e DESAPARECIMENTO
+    assert len(resultado) == 3  # PRIMEIRA_OBSERVACAO, ABERTURA_CONFIRMADA, DESAPARECIMENTO
     por_tipo = {c.event_type: c for c in resultado}
     assert por_tipo["PRIMEIRA_OBSERVACAO"].contagem == 2
+    assert por_tipo["ABERTURA_CONFIRMADA"].contagem == 1
     assert por_tipo["DESAPARECIMENTO"].contagem == 1
     for c in resultado:
         assert c.territorio_id == "curitiba-bairro-centro"
@@ -43,10 +45,9 @@ def test_conta_por_bairro_categoria_mes_e_tipo():
         assert c.mes == date(2026, 8, 1)
 
 
-def test_ignora_outros_tipos_de_evento():
+def test_ignora_mudanca_categoria():
     eventos = [
         _evento("MUDANCA_CATEGORIA", "curitiba-bairro-centro", "bares_restaurantes", date(2026, 8, 1)),
-        _evento("ABERTURA_CONFIRMADA", "curitiba-bairro-centro", "bares_restaurantes", date(2026, 8, 1)),
     ]
 
     resultado = calcular_contagem_por_bairro_categoria_mes(eventos)

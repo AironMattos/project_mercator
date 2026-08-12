@@ -20,13 +20,15 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   getCategorias,
+  getCoberturaTemporal,
   getMetricasComercio,
   getTerritorios,
   type Categoria,
+  type CoberturaTemporal,
   type GeoJsonFeatureCollection,
   type MetricaComercio,
 } from "@/lib/api";
-import { intervaloUltimosMeses, PRESETS_PERIODO } from "@/lib/periodo";
+import { formatarMesAno, intervaloUltimosMeses, PRESETS_PERIODO } from "@/lib/periodo";
 
 const TODAS_CATEGORIAS = "todas";
 const PERIODO_CUSTOM = "custom";
@@ -34,7 +36,12 @@ const PERIODO_CUSTOM = "custom";
 type EstadoBase =
   | { status: "carregando" }
   | { status: "erro"; mensagem: string }
-  | { status: "pronto"; territorios: GeoJsonFeatureCollection; categorias: Categoria[] };
+  | {
+      status: "pronto";
+      territorios: GeoJsonFeatureCollection;
+      categorias: Categoria[];
+      cobertura: CoberturaTemporal;
+    };
 
 type EstadoMetricas =
   | { status: "carregando" }
@@ -44,6 +51,20 @@ type EstadoMetricas =
 function formatarDataCurta(iso: string): string {
   const [ano, m, d] = iso.split("-");
   return `${d}/${m}/${ano.slice(2)}`;
+}
+
+// A cobertura real do dado é sempre um fato distinto do preset de período
+// escolhido no filtro - "últimos 12 meses" é sempre um range válido de
+// filtro, exista ou não 12 meses de evento real dentro dele. Ver achado da
+// auditoria de 2026-08-12.
+function textoCobertura(cobertura: CoberturaTemporal): string {
+  if (!cobertura.mesInicio || !cobertura.mesFim) {
+    return "nenhum evento processado ainda";
+  }
+  if (cobertura.mesInicio === cobertura.mesFim) {
+    return formatarMesAno(cobertura.mesInicio);
+  }
+  return `${formatarMesAno(cobertura.mesInicio)} – ${formatarMesAno(cobertura.mesFim)}`;
 }
 
 export function Dashboard() {
@@ -71,9 +92,9 @@ export function Dashboard() {
   // dependem dos filtros.
   useEffect(() => {
     let cancelado = false;
-    Promise.all([getTerritorios(), getCategorias()])
-      .then(([territorios, categorias]) => {
-        if (!cancelado) setBase({ status: "pronto", territorios, categorias });
+    Promise.all([getTerritorios(), getCategorias(), getCoberturaTemporal()])
+      .then(([territorios, categorias, cobertura]) => {
+        if (!cancelado) setBase({ status: "pronto", territorios, categorias, cobertura });
       })
       .catch((erro: unknown) => {
         if (!cancelado) {
@@ -198,6 +219,13 @@ export function Dashboard() {
           {formatarDataCurta(dataInicio)} – {formatarDataCurta(dataFim)}
         </span>
       </div>
+
+      {base.status === "pronto" && (
+        <div className="border-b px-6 py-1.5 text-xs text-muted-foreground">
+          Dados reais processados: {textoCobertura(base.cobertura)} — o período acima é
+          só o filtro, pode não ter evento em todo o intervalo.
+        </div>
+      )}
 
       <main className="flex flex-1 flex-col p-6">
         {base.status === "carregando" && (

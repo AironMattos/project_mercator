@@ -167,6 +167,24 @@ def seeded_session(test_engine):
                 event_type="DESAPARECIMENTO",
                 contagem=1,
             ),
+            # ABERTURA_CONFIRMADA (confiança alta) - até a correção de
+            # 2026-08-12, esse tipo nunca chegava aqui (ver TIPOS_CONSIDERADOS
+            # em analytics/features/contagem_eventos.py), então "aberturas"
+            # media só PRIMEIRA_OBSERVACAO (confiança baixa).
+            ContagemEventos(
+                territorio_id="curitiba-bairro-centro",
+                categoria_id="bares_restaurantes",
+                mes=date(2026, 8, 1),
+                event_type="ABERTURA_CONFIRMADA",
+                contagem=6,
+            ),
+            ContagemEventos(
+                territorio_id="curitiba-bairro-batel",
+                categoria_id="bares_restaurantes",
+                mes=date(2026, 8, 1),
+                event_type="ABERTURA_CONFIRMADA",
+                contagem=3,
+            ),
         ]
     )
     session.commit()

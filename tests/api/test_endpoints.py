@@ -32,14 +32,15 @@ def test_metricas_sem_filtro_agrega_por_bairro_para_o_mapa(client):
     centro = por_bairro["curitiba-bairro-centro"]
     assert centro["mes"] is None
     assert centro["categoria_id"] is None
-    assert centro["aberturas"] == 5 + 3 + 1
+    # aberturas = PRIMEIRA_OBSERVACAO + ABERTURA_CONFIRMADA (ver conftest)
+    assert centro["aberturas"] == 5 + 3 + 1 + 6
     assert centro["desaparecimentos"] == 2 + 4
     assert centro["saldo"] == centro["aberturas"] - centro["desaparecimentos"]
 
     batel = por_bairro["curitiba-bairro-batel"]
-    assert batel["aberturas"] == 2
+    assert batel["aberturas"] == 2 + 3
     assert batel["desaparecimentos"] == 1
-    assert batel["saldo"] == 1
+    assert batel["saldo"] == batel["aberturas"] - batel["desaparecimentos"]
 
 
 def test_metricas_com_territorio_id_devolve_serie_temporal_por_mes(client):
@@ -50,8 +51,30 @@ def test_metricas_com_territorio_id_devolve_serie_temporal_por_mes(client):
 
     assert por_mes["2026-07-01"]["aberturas"] == 5
     assert por_mes["2026-07-01"]["desaparecimentos"] == 2
-    assert por_mes["2026-08-01"]["aberturas"] == 3 + 1
+    assert por_mes["2026-08-01"]["aberturas"] == 3 + 1 + 6
     assert por_mes["2026-08-01"]["desaparecimentos"] == 4
+
+
+def test_metricas_aberturas_inclui_abertura_confirmada_alta_confianca(client):
+    """Regressão da auditoria de 2026-08-12: ABERTURA_CONFIRMADA (confiança
+    alta) precisa contar em "aberturas" junto com PRIMEIRA_OBSERVACAO
+    (confiança baixa), não ser descartada silenciosamente.
+    """
+    resp = client.get(
+        "/metricas/comercio",
+        params={"territorio_id": "curitiba-bairro-batel"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["aberturas"] == 2 + 3
+
+
+def test_metricas_cobertura_devolve_primeiro_e_ultimo_mes_com_evento(client):
+    resp = client.get("/metricas/cobertura")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"mes_inicio": "2026-07-01", "mes_fim": "2026-08-01"}
 
 
 def test_metricas_filtra_por_categoria(client):

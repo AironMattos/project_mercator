@@ -6,15 +6,25 @@ from datetime import date
 from analytics.features.models import ContagemEventos
 from domain.event import Evento
 
-TIPOS_CONSIDERADOS = frozenset({"PRIMEIRA_OBSERVACAO", "DESAPARECIMENTO"})
+TIPOS_CONSIDERADOS = frozenset(
+    {"PRIMEIRA_OBSERVACAO", "ABERTURA_CONFIRMADA", "DESAPARECIMENTO"}
+)
 
 
 def calcular_contagem_por_bairro_categoria_mes(
     eventos: Iterable[Evento],
 ) -> list[ContagemEventos]:
-    """Conta PRIMEIRA_OBSERVACAO e DESAPARECIMENTO por bairro, categoria e
-    mês. Regra pura - recebe os eventos já carregados, não sabe nada de
-    banco.
+    """Conta PRIMEIRA_OBSERVACAO, ABERTURA_CONFIRMADA e DESAPARECIMENTO por
+    bairro, categoria e mês. Regra pura - recebe os eventos já carregados,
+    não sabe nada de banco.
+
+    Até a auditoria de 2026-08-12, essa contagem só incluía
+    PRIMEIRA_OBSERVACAO e DESAPARECIMENTO - isso fazia o campo "aberturas"
+    exposto pela API (feature_repository.consultar_metricas_comercio) somar
+    só entidades de confiança BAIXA ("nunca vista antes, sem prova de
+    quando abriu"), excluindo justamente ABERTURA_CONFIRMADA (confiança
+    ALTA, abertura genuína confirmada por INICIO_ATIVIDADE). Corrigido
+    incluindo ABERTURA_CONFIRMADA aqui.
 
     A métrica mais simples possível: nada de quociente locacional, nada de
     Signal Engine - só contagem, um evento por linha.
