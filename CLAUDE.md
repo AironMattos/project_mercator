@@ -363,8 +363,51 @@ omissão, é a mesma decisão de "comece simples" do princípio 5, estendida ao 
 hospedado (Supabase/Neon) provisionado ainda, sem Render/Vercel configurados. Retomar 6b/7d é
 trabalho futuro condicional, não bloqueia o restante da sequência (7a-7c seguem localmente).
 
-**Próximo checkpoint: 7a — esqueleto do frontend** (`apps/web/`, Next.js + TypeScript +
-Tailwind + shadcn/ui), consumindo a API local do checkpoint 6a.
+### Checkpoint 7a — Esqueleto do frontend: **concluído**
+
+- `apps/web/` inicializado via `create-next-app` (Next.js **16.3.0**, App Router, TypeScript,
+  Tailwind v4, `src/` layout) + `shadcn/ui` (`components.json`, estilo `base-nova`, base color
+  `neutral`) — componentes adicionados: `select`, `sheet`, `card`, `skeleton`, `alert`,
+  `badge`, `popover`, `command`, `calendar`, `button`. **Nota de versão**: Next.js 16 é mais
+  novo que o conhecimento do modelo (o próprio scaffold gera um `AGENTS.md` avisando disso,
+  mantido no repo) — convenções checadas contra `node_modules/next/dist/docs/` antes de
+  escrever código; nada de relevante mudou para o que foi construído aqui (Server/Client
+  Components, `"use client"`, `next/font` funcionam como esperado).
+- Tipografia e paleta de tinta da seção 4.2 do prompt de referência já aplicadas globalmente em
+  `src/app/globals.css` (sobrescrevendo os tokens default do shadcn, não só os do mapa/gráfico):
+  fonte `system-ui, -apple-system, "Segoe UI", sans-serif` (removido o Geist do scaffold —
+  spec pede explicitamente sem fonte display nesta fase), `--background #ffffff`,
+  `--foreground #0b0b0b`, `--muted-foreground #52514e`, `--border #e1e0d9`. Modo escuro
+  **não** implementado nesta fase (opcional pela spec) - os tokens `.dark` ficaram como
+  default do shadcn, mas inertes (sem toggle, sem media query automática).
+- `src/lib/api.ts` — cliente HTTP tipado para os três endpoints de `apps/api/`
+  (`getTerritorios`, `getCategorias`, `getMetricasComercio`), lendo a URL da API de
+  `NEXT_PUBLIC_API_URL` (`.env.local`, gitignored; `.env.example` documenta a variável -
+  default `http://localhost:8000`, a API local do checkpoint 6a).
+- `src/components/dashboard.tsx` (`"use client"`) — layout base: cabeçalho, linha de filtros
+  (combobox de categoria já populado pela API real; período com os presets da seção 4.3 do
+  prompt, ainda não ligado a nenhum request) e área de conteúdo. Os três estados exigidos pela
+  seção 4.1 já existem aqui, antes mesmo do mapa existir: **carregando** (`Skeleton`), **erro**
+  (`Alert` destructive, com a URL da API configurada na mensagem) e **vazio** (`Alert` neutro se
+  a API responder sem território nenhum) — meta é nunca deixar a tela em um spinner infinito ou
+  uma tela quebrada. Estado "pronto" mostra 3 cards de conferência (contagem de territórios,
+  categorias e linhas de métrica) - um placeholder deliberado, substituído pelo mapa no
+  checkpoint 7b.
+- **Rodado localmente**: `npm run build` compila e type-checa sem erro; `npm run lint` sem
+  avisos; `npm run dev` (porta 3000) consumindo `uvicorn` local (porta 8000) - confirmado via
+  `curl` que as respostas de `/territorios`, `/categorias` e `/metricas/comercio` carregam o
+  header CORS certo para `http://localhost:3000` (não só o preflight `OPTIONS`, a resposta real
+  também), e que os dados batem com o esperado (75 territórios, 26 categorias, 73 linhas de
+  métrica agregada - 72 bairros com pelo menos um evento + 1 linha agregada de eventos sem
+  bairro resolvido). **Verificação visual no navegador não foi feita por mim** - a extensão
+  Claude em Chrome foi recusada nesta sessão, e não há outra forma de rodar JS no browser
+  disponível; os três estados (carregando/erro/vazio) e os 3 cards de conferência não foram
+  vistos renderizados de fato. Pedir para o dono abrir `http://localhost:3000` (com a API
+  rodando) e confirmar visualmente antes de considerar o checkpoint fechado de verdade.
+
+**Deploy (6b/7d) segue adiado por decisão do dono** — tudo roda local por enquanto (ver nota
+acima). **Próximo checkpoint: 7b — mapa coroplético** (MapLibre GL JS, `/territorios` +
+`/metricas/comercio` sem `territorio_id`, codificação divergente da seção 4.2).
 
 ## Notas operacionais
 
