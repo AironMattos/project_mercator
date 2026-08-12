@@ -29,8 +29,12 @@ Python (3.14 no ambiente atual — todas as libs geoespaciais têm wheels compat
 PostgreSQL + PostGIS (local via `docker-compose.yml`; hospedado em Supabase/Neon para
 produção/piloto, ainda não provisionado). Alembic para migrações. pandas/geopandas/DuckDB só
 como ferramenta de transformação em lote na ingestão, não como banco canônico. FastAPI em
-`apps/api/` (ainda não iniciado). `src/` empacotado via `pyproject.toml` (layout src, modo
-editável) — `apps/api` importará de `src/` como biblioteca quando existir.
+`apps/api/` — **iniciado no checkpoint 6a**, rotas finas em `apps/api/routers/` chamando
+repositórios de `src/infrastructure/database/repositories/`, sem lógica de negócio própria.
+`src/` empacotado via `pyproject.toml` (layout src, modo editável) — `apps/api` importa
+`domain`/`commerce`/`analytics`/`infrastructure` de `src/` como biblioteca (pacote `mercator`
+instalado em modo editável no `.venv`). Next.js (App Router) + TypeScript + Tailwind +
+shadcn/ui + MapLibre GL JS + Recharts em `apps/web/` — ainda não iniciado (checkpoint 7).
 
 ## Schema (resumo — DDL completo era o de referência do prompt original)
 
@@ -297,14 +301,64 @@ exata do `Protocol`, que não é estritamente verificada em runtime.
 - 6 novos testes automatizados (`tests/analytics/features/`). Total do projeto: **83 testes,
   todos passando**.
 
-## Todos os 5 checkpoints da sequência original estão concluídos
+Os 5 checkpoints da sequência original (fundação até a primeira feature) estão concluídos.
+Depois de uma revisão, a sequência seguiu para uma segunda fase: API (FastAPI) + frontend
+(Next.js/MapLibre/Recharts) servindo o Radar de Comércio, dividida em checkpoints 6a-7d
+(ver prompt de referência da fase 2 para o detalhe completo de cada um).
 
-Conforme o plano original: **parar aqui e aguardar revisão antes de seguir para API ou
-front-end** — nenhum dos dois tem dado maduro o suficiente para valer a pena construir em
-cima ainda. Se for retomar depois de uma revisão, os candidatos naturais de continuação (não
-solicitados, apenas o que ficaria disponível) seriam: ampliar a cobertura de
-`cnae_categoria_map` além dos 79 códigos atuais, tratar `FECHAMENTO_CONFIRMADO` quando uma
-segunda fonte existir, ou começar `apps/api/` como uma camada fina sobre `analytics.features`.
+### Checkpoint 6a — API local: **concluído**
+
+- `apps/api/` inicializado. `main.py` (app FastAPI + CORS), `dependencies.py`
+  (`get_db`, adapta `infrastructure.database.session.get_session` para o `Depends` do
+  FastAPI), `schemas.py` (modelos Pydantic de resposta), `routers/` (um módulo por recurso:
+  `territorios.py`, `categorias.py`, `metricas.py`). Rotas finas de propósito — cada handler
+  só chama um repositório de `src/infrastructure/database/repositories/` e reformata o
+  resultado; nenhuma regra de negócio nova mora em `apps/api/`.
+- Três endpoints implementados, todos `GET`, sem autenticação (deliberado, conforme escopo
+  desta fase):
+  - `/territorios` — `dim_territorio` (nível `bairro`) como GeoJSON `FeatureCollection`
+    (`shapely.geometry.mapping` sobre a geometria já em EPSG:4326).
+  - `/categorias` — `dim_categoria` (`categoria_id`, `nome`).
+  - `/metricas/comercio` — filtros `territorio_id`, `categoria_id`, `data_inicio`,
+    `data_fim` (todos opcionais via query param). **Sem `territorio_id`**: agregado por
+    bairro (soma o período inteiro) — para colorir o mapa. **Com `territorio_id`**: agrupado
+    por mês — a série temporal completa daquele bairro, para o painel de detalhe. Formato do
+    item: `{ territorio_id, categoria_id, mes, aberturas, desaparecimentos, saldo }`
+    (`saldo = aberturas - desaparecimentos`).
+  - `/health` — checagem simples para o health check da plataforma de deploy (checkpoint 6b).
+- Duas funções novas de leitura, na mesma camada de repositório já existente (dado que a
+  reformatação de linhas de `analytics.contagem_eventos` em `aberturas`/`desaparecimentos`/
+  `saldo` é reshape de dado já calculado, não uma regra nova — por isso vive em
+  `infrastructure/`, não em `domain/` nem em `apps/api/`):
+  `categoria_repository.listar_categorias` e
+  `feature_repository.consultar_metricas_comercio` (agregação via SQL —
+  `SUM(CASE WHEN event_type = ...)` agrupado por bairro ou por bairro+mês, conforme
+  `territorio_id` esteja ausente ou presente).
+- CORS: `CORSMiddleware` com origens configuráveis via `CORS_ORIGINS` (env var, lista separada
+  por vírgula) — `http://localhost:3000` sempre incluído por padrão. A URL de produção do
+  Vercel ainda não existe (checkpoint 7d não rodou) — falta setar `CORS_ORIGINS` na plataforma
+  de deploy da API assim que o domínio do Vercel existir; documentado em `.env.example`.
+- **Rodado localmente contra o Postgres real** (dado dos checkpoints 1-5): `/categorias`
+  devolve as 26 categorias, `/territorios` devolve os 75 bairros como GeoJSON válido,
+  `/metricas/comercio` sem filtro devolve 1 linha por bairro (ex.: CENTRO — 216 aberturas, 407
+  desaparecimentos, saldo -191, coerente com o resumo do checkpoint 5), com `territorio_id`
+  devolve a série (hoje só agosto/2026 tem eventos gravados — 1 ponto na série; mais meses vão
+  aparecer automaticamente conforme mais snapshots forem processados, sem mudança de código).
+- Testes automatizados: `tests/api/conftest.py` recria um banco `mercator_test` do zero
+  (schemas + extensão PostGIS + `Base.metadata.create_all`) e semeia um cenário mínimo e
+  conhecido (2 bairros, 2 categorias, contagens em jul/ago-2026) a cada sessão de teste — a
+  API é toda leitura, então a sessão semeada é reaproveitada entre os testes sem necessidade de
+  rollback por teste. `tests/api/test_endpoints.py` cobre os três endpoints (geojson bem
+  formado, agregação por bairro, série por mês, filtro de categoria, filtro de intervalo de
+  data, bairro sem dado, CORS, health). 9 novos testes, todos passando. Total do projeto: **92
+  testes, todos passando**.
+- `pyproject.toml`: `httpx` adicionado a `dev` (dependência do `TestClient` do FastAPI);
+  `apps/api` adicionado a `pythonpath` do pytest (para os testes importarem `main`/
+  `dependencies` sem hack de `sys.path`).
+
+**Próximo checkpoint: 6b — deploy da API** num free tier (Render/Railway/Fly.io), com
+`CORS_ORIGINS` já preparado para a URL do Vercel que vai existir no checkpoint 7d, e
+confirmação de que os três endpoints respondem a partir de uma rede externa (não localhost).
 
 ## Notas operacionais
 

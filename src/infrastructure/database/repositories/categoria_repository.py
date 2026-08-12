@@ -42,6 +42,14 @@ def upsert_cnae_categoria_map(
     return len(rows)
 
 
+def listar_categorias(session: Session) -> list[Categoria]:
+    stmt = select(DimCategoria).order_by(DimCategoria.nome)
+    return [
+        Categoria(categoria_id=row.categoria_id, nome=row.nome)
+        for row in session.execute(stmt).scalars()
+    ]
+
+
 def categoria_id_por_codigo_cnae(session: Session) -> dict[str, str]:
     """Carrega o mapeamento codigo_cnae -> categoria_id do banco, para uso
     em pipelines que precisam resolver a categoria de uma observação.

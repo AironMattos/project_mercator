@@ -26,6 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0",
+    "httpx>=0.28",
 ]
 
 [tool.setuptools.packages.find]
@@ -34,4 +35,4 @@ include = ["domain*", "commerce*", "pipelines*", "analytics*", "infrastructure*"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "apps/api"]
