@@ -45,8 +45,11 @@ editável) — `apps/api` importará de `src/` como biblioteca quando existir.
 - `canonical.dim_territorio` — **implementado**. `territorio_id TEXT PK`, `nivel` (só
   `'bairro'` populado até agora), `nome`, `nome_alternativo TEXT[]`, `geometria
   GEOMETRY(MultiPolygon, 4326)`, `territorio_pai_id` (auto-FK), `cidade_id`.
-- `canonical.dim_cnae`, `canonical.dim_categoria`, `canonical.cnae_categoria_map` — **ainda
-  não implementados** (checkpoint 4).
+- `canonical.dim_cnae` — **implementado**. `codigo_cnae TEXT PK` (7 dígitos, padrão do
+  "id" da API do IBGE), `descricao`, `secao`, `divisao`, `grupo`, `classe`, `subclasse`.
+- `canonical.dim_categoria` — **implementado**. `categoria_id TEXT PK`, `nome`. 26 categorias.
+- `canonical.cnae_categoria_map` — **implementado**. `(codigo_cnae, categoria_id)` PK
+  composta, ambos FK. 79 mapeamentos (lista pequena e explícita, de propósito).
 - `events.fato_evento_territorial` — **implementado**. O que foi inferido: `evento_id`,
   `entity_type`, `event_type`, `entidade_id`, `territorio_id`, `data_evento`, `confianca`
   (`alta`/`media`/`baixa`), `origem_observacoes UUID[]` (aponta de volta para as
@@ -56,6 +59,11 @@ editável) — `apps/api` importará de `src/` como biblioteca quando existir.
 - `infra.pipeline_run` — **implementado**. Log de execução de conector: `conector_id`,
   `iniciado_em`/`finalizado_em`, `status` (`sucesso`/`falha`/`parcial`), contadores de
   registros lidos/gravados/com falha.
+- `analytics.contagem_eventos` — **implementado** (checkpoint 5, schema `analytics` novo).
+  `territorio_id`/`categoria_id` (FK, nullable), `mes DATE`, `event_type`, `contagem INT`.
+  Sem PK de negócio (território/categoria podem ser nulos) - é 100% derivada de
+  `fato_evento_territorial`, recomputada do zero (`DELETE` + `INSERT`) a cada execução, nunca
+  atualizada linha a linha.
 
 Catálogo de eventos do Radar de Comércio (`entity_type = "comercio"`) — **implementado**:
 `PRIMEIRA_OBSERVACAO`, `ABERTURA_CONFIRMADA`, `DESAPARECIMENTO`, `MUDANCA_CATEGORIA`.
@@ -261,16 +269,42 @@ exata do `Protocol`, que não é estritamente verificada em runtime.
   mapeamento categoria↔código, conector com sessão HTTP falsa. Total do projeto: 77 testes,
   todos passando.
 
-### Próximo checkpoint: Checkpoint 5 — Primeira feature
+### Checkpoint 5 — Primeira feature: **concluído**
 
-- Implementar `src/analytics/features/` com uma única métrica: contagem de
-  `PRIMEIRA_OBSERVACAO` e `DESAPARECIMENTO` por bairro (`territorio_id`) e por categoria
-  (`payload->>'categoria_id'`), por mês. Os dois já estão prontos para isso -
-  `events.fato_evento_territorial` tem `territorio_id` como coluna própria e `categoria_id`
-  já vem no `payload` desde este checkpoint.
-- Não implementar quociente locacional nem Signal Engine ainda - confirmar que a métrica mais
-  simples possível já conta uma história coerente antes de empilhar mais em cima.
-- Depois deste checkpoint, parar e aguardar revisão antes de seguir para API ou front-end.
+- `src/analytics/features/models.py` — dataclass `ContagemEventos` (territorio_id,
+  categoria_id, mes, event_type, contagem). `contagem_eventos.py` —
+  `calcular_contagem_por_bairro_categoria_mes(eventos: Iterable[Evento]) -> list[ContagemEventos]`,
+  regra pura (recebe `Evento` já carregados, sem I/O), agrupa por
+  (`territorio_id`, `payload["categoria_id"]`, mês de `data_evento`, `event_type`), só para
+  `PRIMEIRA_OBSERVACAO` e `DESAPARECIMENTO` — nada de quociente locacional, nada de Signal
+  Engine ainda, exatamente como pedido.
+- `infrastructure/database/orm/contagem_eventos.py` + `repositories/feature_repository.py`
+  (`substituir_contagem_eventos`: `DELETE` + `INSERT` completo a cada execução - seguro porque
+  a tabela é 100% derivada, não é fonte de verdade) + `evento_repository.iter_eventos`
+  (lê `fato_evento_territorial` de volta como `Evento` de domínio).
+- Migração `52bae9c35c69` cria o schema `analytics` e `analytics.contagem_eventos`.
+- `src/analytics/features/run_contagem_eventos.py` — carrega eventos, calcula, grava, e
+  imprime um resumo (top 10 bairros/categorias por tipo de evento) para conferência visual.
+- **Rodado contra dado real**: 6.697 eventos → 1.605 linhas de contagem. **A história é
+  coerente**: CENTRO lidera tanto `PRIMEIRA_OBSERVACAO` (216) quanto `DESAPARECIMENTO` (407) -
+  esperado, é o bairro de maior densidade comercial de Curitiba - seguido por bairros
+  comerciais conhecidos (Água Verde, Batel, Bigorrilho, Portão, Juvevê). Por categoria, "Saúde
+  e clínicas" e "Bares, restaurantes e lanchonetes" lideram aberturas; "Apoio administrativo"
+  e "Seguros e serviços financeiros" lideram desaparecimentos - plausível para setores de alto
+  turnover. ~40-55% dos eventos ficam sem bairro/categoria resolvido (herda a cobertura
+  parcial dos checkpoints 2 e 4) - aparece como "(sem bairro)"/"(sem categoria)" no resumo, não
+  é descartado silenciosamente.
+- 6 novos testes automatizados (`tests/analytics/features/`). Total do projeto: **83 testes,
+  todos passando**.
+
+## Todos os 5 checkpoints da sequência original estão concluídos
+
+Conforme o plano original: **parar aqui e aguardar revisão antes de seguir para API ou
+front-end** — nenhum dos dois tem dado maduro o suficiente para valer a pena construir em
+cima ainda. Se for retomar depois de uma revisão, os candidatos naturais de continuação (não
+solicitados, apenas o que ficaria disponível) seriam: ampliar a cobertura de
+`cnae_categoria_map` além dos 79 códigos atuais, tratar `FECHAMENTO_CONFIRMADO` quando uma
+segunda fonte existir, ou começar `apps/api/` como uma camada fina sobre `analytics.features`.
 
 ## Notas operacionais
 
@@ -292,3 +326,11 @@ exata do `Protocol`, que não é estritamente verificada em runtime.
   `gen_random_uuid()`, `now()`) precisa ser `sa.text("...")`, nunca uma string Python pura —
   Postgres tenta converter a string literal para o tipo da coluna e falha. Detectado e
   corrigido em `orm/entidade.py`, `orm/observacao_entidade.py`, `orm/pipeline_run.py`.
+- O console do Windows (`cp1252`/similar) exibe texto acentuado gravado no banco como lixo
+  (ex.: "CÍVICO" vira "C�VICO") ao rodar `print()` direto no terminal - **é só exibição**, o
+  dado em si está correto em UTF-8 (confirmado via `psql`). Não gastar tempo "corrigindo"
+  acentuação que aparece quebrada só no console.
+- Para explorar o banco visualmente: pgAdmin com host `localhost`, porta `5432`, banco/usuário/
+  senha `mercator`/`mercator`/`mercator` (mesmos valores de `.env.example`). Os dados de
+  verdade estão nos schemas `canonical`, `events`, `infra` e `analytics` - `public` é só o
+  padrão do Postgres/PostGIS.
