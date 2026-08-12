@@ -60,13 +60,27 @@ class AlvarasSmfConnector:
         self._raw_dir = raw_dir
         self._diretorio_url = diretorio_url
 
-    def fetch(self) -> RawSnapshot:
-        nome_arquivo = self._arquivo_mais_recente()
+    def fetch(self, nome_arquivo: str | None = None) -> RawSnapshot:
+        """Baixa o snapshot. Por padrão resolve o mês mais recente disponível
+        no diretório; passar `nome_arquivo` explicitamente permite buscar um
+        mês histórico específico (ex.: para detecção de evento, que precisa
+        de dois snapshots de meses diferentes).
+        """
+        nome_arquivo = nome_arquivo or self._arquivo_mais_recente()
         url = self._diretorio_url + nome_arquivo
         referencia = parse_referencia_arquivo(nome_arquivo)
 
         self._raw_dir.mkdir(parents=True, exist_ok=True)
         destino = self._raw_dir / nome_arquivo
+
+        if destino.exists():
+            logger.info("reaproveitando snapshot já baixado: %s", destino)
+            return RawSnapshot(
+                fonte_id=self.fonte_id,
+                capturado_em=datetime.now(timezone.utc),
+                snapshot_ref=str(destino),
+                conteudo={"path": str(destino), "observado_em": referencia, "url": url},
+            )
 
         logger.info("baixando %s (em streaming, sem carregar em memória)...", url)
         with self._session.get(url, stream=True, timeout=120) as resp:

@@ -5,10 +5,12 @@ MB e não deve ser carregado inteiro em memória.
 
 Uso:
     python -m pipelines.ingestion.run_alvaras_smf
+    python -m pipelines.ingestion.run_alvaras_smf 2026-07-01_Alvaras_-_Base_de_Dados.csv
 """
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -51,6 +53,7 @@ def _gravar_lote(lote: list[RegistroNormalizado]) -> tuple[int, int]:
 
 
 def main() -> None:
+    nome_arquivo = sys.argv[1] if len(sys.argv) > 1 else None
     connector = AlvarasSmfConnector()
     iniciado_em = datetime.now(timezone.utc)
     status = "sucesso"
@@ -63,7 +66,7 @@ def main() -> None:
     )
 
     try:
-        snapshot = connector.fetch()
+        snapshot = connector.fetch(nome_arquivo)
 
         lote: list[RegistroNormalizado] = []
         for registro in connector.normalize(snapshot, territorio_lookup):
