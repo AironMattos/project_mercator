@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import uuid
 from datetime import date
 
 import pytest
@@ -13,17 +12,18 @@ from sqlalchemy.orm import sessionmaker
 
 from infrastructure.database.orm.base import Base
 from infrastructure.database.orm.contagem_eventos import ContagemEventos
+from infrastructure.database.orm.contagem_inicio_atividade import ContagemInicioAtividade
 from infrastructure.database.orm.dim_categoria import DimCategoria
-from infrastructure.database.orm.entidade import Entidade
-from infrastructure.database.orm.observacao_entidade import ObservacaoEntidade
 from infrastructure.database.orm.territorio import DimTerritorio
 
 # Modelos ORM importados aqui só para registrar em Base.metadata antes do
-# create_all - a API não usa evento/cnae diretamente, mas as tabelas
-# precisam existir por causa das foreign keys.
+# create_all - a API não usa evento/cnae/entidade/observação diretamente,
+# mas as tabelas precisam existir por causa das foreign keys.
 from infrastructure.database.orm import cnae_categoria_map  # noqa: F401
 from infrastructure.database.orm import dim_cnae  # noqa: F401
+from infrastructure.database.orm import entidade  # noqa: F401
 from infrastructure.database.orm import fato_evento_territorial  # noqa: F401
+from infrastructure.database.orm import observacao_entidade  # noqa: F401
 from infrastructure.database.orm import pipeline_run  # noqa: F401
 
 ADMIN_DATABASE_URL = os.environ.get(
@@ -189,45 +189,37 @@ def seeded_session(test_engine):
         ]
     )
 
-    # entidade/observacao_entidade com INICIO_ATIVIDADE real - exercita o
-    # indicador de aberturas (analytics.features.servico_indicadores), que
-    # lê essa data em vez de fato_evento_territorial (ver checkpoint 8a/8b:
-    # INICIO_ATIVIDADE tem profundidade real mesmo com poucos snapshots).
-    # CENTRO tem 3 meses de histórico dentro da janela de 24 meses antes de
-    # 2026-07 (o "período padrão" derivado do mes_fim de ContagemEventos
-    # acima, 2026-08, menos 1 mês) + 1 mês "atual" -> baseline confiável.
-    # BATEL só tem o mês "atual", sem histórico -> historico_insuficiente,
-    # de propósito (testa o caminho de bairro inelegível pro ranking).
-    def _entidade_com_inicio_atividade(
-        identificador: str, territorio_id: str, inicio_atividade: str
-    ) -> tuple[Entidade, ObservacaoEntidade]:
-        entidade_id = uuid.uuid4()
-        ent = Entidade(
-            entidade_id=entidade_id, tipo_entidade="comercio", identificador_fonte=identificador
-        )
-        obs = ObservacaoEntidade(
-            entidade_id=entidade_id,
-            observado_em=date(2026, 8, 1),
-            fonte_id="alvaras_smf",
-            snapshot_ref="teste",
-            atributos={
-                "territorio_id": territorio_id,
-                "inicio_atividade": inicio_atividade,
-                "cnae_principal": "G.47.1.1-1/00-00",
-            },
-        )
-        return ent, obs
-
-    entidades_observacoes = [
-        _entidade_com_inicio_atividade("CENTRO-001", "curitiba-bairro-centro", "2024-08-15"),
-        _entidade_com_inicio_atividade("CENTRO-002", "curitiba-bairro-centro", "2025-03-10"),
-        _entidade_com_inicio_atividade("CENTRO-003", "curitiba-bairro-centro", "2025-11-20"),
-        _entidade_com_inicio_atividade("CENTRO-004", "curitiba-bairro-centro", "2026-07-05"),
-        _entidade_com_inicio_atividade("BATEL-001", "curitiba-bairro-batel", "2026-07-12"),
-    ]
-    for ent, obs in entidades_observacoes:
-        session.add(ent)
-        session.add(obs)
+    # analytics.contagem_inicio_atividade - a tabela materializada que
+    # indicador_repository lê (checkpoint de otimização de 2026-08-12: a
+    # query ao vivo contra observacao_entidade, usada até então, virou
+    # cara demais pra rodar por request; ver
+    # run_contagem_inicio_atividade.py). Semeada direto aqui, no mesmo
+    # espírito de ContagemEventos acima (é uma feature derivada, não
+    # rodamos o pipeline de verdade num teste). CENTRO tem 3 meses de
+    # histórico dentro da janela de 24 meses antes de 2026-07 (o "período
+    # padrão" derivado do mes_fim de ContagemEventos acima, 2026-08, menos
+    # 1 mês) + 1 mês "atual" -> baseline confiável. BATEL só tem o mês
+    # "atual", sem histórico -> baseline zero, de propósito (testa o
+    # caminho de bairro inelegível pro ranking).
+    session.add_all(
+        [
+            ContagemInicioAtividade(
+                territorio_id="curitiba-bairro-centro", categoria_id=None, mes=date(2024, 8, 1), contagem=1
+            ),
+            ContagemInicioAtividade(
+                territorio_id="curitiba-bairro-centro", categoria_id=None, mes=date(2025, 3, 1), contagem=1
+            ),
+            ContagemInicioAtividade(
+                territorio_id="curitiba-bairro-centro", categoria_id=None, mes=date(2025, 11, 1), contagem=1
+            ),
+            ContagemInicioAtividade(
+                territorio_id="curitiba-bairro-centro", categoria_id=None, mes=date(2026, 7, 1), contagem=1
+            ),
+            ContagemInicioAtividade(
+                territorio_id="curitiba-bairro-batel", categoria_id=None, mes=date(2026, 7, 1), contagem=1
+            ),
+        ]
+    )
 
     session.commit()
 

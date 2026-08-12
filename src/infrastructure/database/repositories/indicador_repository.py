@@ -2,17 +2,15 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import Date, func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from analytics.features import PontoMensal
-from commerce.cnae import normalizar_codigo_cnae
-from infrastructure.database.orm.observacao_entidade import ObservacaoEntidade
+from infrastructure.database.orm.contagem_inicio_atividade import ContagemInicioAtividade
 
-FONTE_ID = "alvaras_smf"
-
-# Quantos meses pra trás materializamos com zero-fill. Precisa cobrir não
-# só a janela de baseline (24 meses) como também o caso de
+# Quantos meses pra trás materializamos com zero-fill (na leitura, não na
+# tabela em si - a tabela só tem os meses com contagem > 0). Precisa
+# cobrir não só a janela de baseline (24 meses) como também o caso de
 # servico_indicadores.indicadores_aberturas_por_mes_bairro, que busca a
 # série UMA vez pro mês mais recente de uma lista (ex.: os até 12 meses do
 # preset "últimos 12 meses" do frontend) e reusa pra calcular baseline de
@@ -32,9 +30,9 @@ def _zero_fill(
     """Preenche com 0 os meses sem nenhum registro de INICIO_ATIVIDADE
     dentro da janela - ausência aqui é informação real ("nenhuma entidade
     conhecida abriu nesse mês"), não "não sabemos". Diferente do histórico
-    de fechamento (ver serie_desaparecimentos_bairro), que não é zero-
-    preenchido porque ausência lá significa "não processamos essa
-    comparação de snapshot", não "zero fechamentos".
+    de fechamento (feature_repository), que não é zero-preenchido porque
+    ausência lá significa "não processamos essa comparação de snapshot",
+    não "zero fechamentos".
     """
     inicio = _mes_seguinte(mes_referencia, -meses_historico)
     pontos = []
@@ -45,107 +43,52 @@ def _zero_fill(
     return pontos
 
 
-def _contagens_inicio_atividade_por_territorio_mes(
-    session: Session,
-    *,
-    categoria_id: str | None,
-    categoria_por_codigo: dict[str, str],
-    territorio_id: str | None = None,
-) -> dict[str, dict[date, float]]:
-    """Agrupa INICIO_ATIVIDADE (data real por registro, não a data do
-    evento de detecção) por bairro e mês, deduplicado por entidade - o
-    mesmo alvará aparece em mais de um snapshot com o mesmo
-    INICIO_ATIVIDADE (é um fato histórico fixo do registro, não muda), e
-    contá-lo mais de uma vez infla a série. Usa DISTINCT ON pra ficar só
-    com a observação mais recente de cada entidade.
-
-    Retorna {territorio_id: {mes: contagem}} - só bairros/meses com pelo
-    menos 1 ocorrência aparecem aqui (não zero-preenchido, ver _zero_fill).
-    """
-    tabela = ObservacaoEntidade
-    territorio_expr = tabela.atributos["territorio_id"].astext
-    inicio_expr = tabela.atributos["inicio_atividade"].astext
-    cnae_expr = tabela.atributos["cnae_principal"].astext
-
-    ultima_observacao = (
-        select(
-            tabela.entidade_id,
-            territorio_expr.label("territorio_id"),
-            inicio_expr.label("inicio_atividade"),
-            cnae_expr.label("cnae_principal"),
-        )
-        .distinct(tabela.entidade_id)
-        .where(tabela.fonte_id == FONTE_ID, inicio_expr.isnot(None))
-        .order_by(tabela.entidade_id, tabela.observado_em.desc())
-        .subquery()
-    )
-
-    mes_expr = func.date_trunc("month", ultima_observacao.c.inicio_atividade.cast(Date))
-    stmt = (
-        select(
-            ultima_observacao.c.territorio_id,
-            mes_expr.label("mes"),
-            ultima_observacao.c.cnae_principal,
-            func.count().label("contagem"),
-        )
-        .where(ultima_observacao.c.territorio_id.isnot(None))
-        .group_by(ultima_observacao.c.territorio_id, mes_expr, ultima_observacao.c.cnae_principal)
-    )
-    if territorio_id is not None:
-        stmt = stmt.where(ultima_observacao.c.territorio_id == territorio_id)
-
-    resultado: dict[str, dict[date, float]] = {}
-    for row in session.execute(stmt):
-        if categoria_id is not None:
-            codigo = normalizar_codigo_cnae(row.cnae_principal)
-            if categoria_por_codigo.get(codigo) != categoria_id:
-                continue
-        mes = row.mes.date() if hasattr(row.mes, "date") else row.mes
-        por_mes = resultado.setdefault(row.territorio_id, {})
-        por_mes[mes] = por_mes.get(mes, 0.0) + row.contagem
-
-    return resultado
-
-
 def serie_aberturas_bairro(
     session: Session,
     *,
     territorio_id: str,
     categoria_id: str | None,
-    categoria_por_codigo: dict[str, str],
     mes_referencia: date,
     meses_historico: int = MESES_HISTORICO_PADRAO,
 ) -> list[PontoMensal]:
-    """Série mensal de aberturas de um bairro, baseada em INICIO_ATIVIDADE
-    - tem profundidade real de anos mesmo só com os 2 snapshots de evento
-    já processados, porque a data em si é um atributo fixo do registro, não
-    depende de quantas vezes comparamos snapshots. Zero-preenchida dentro
-    da janela solicitada.
+    """Série mensal de aberturas de um bairro, lida de
+    analytics.contagem_inicio_atividade (materializada - ver
+    run_contagem_inicio_atividade.py; a query ao vivo contra
+    observacao_entidade era cara demais pra rodar por request, achado
+    medindo o tempo de resposta real de /ranking/comercio e
+    /bairros/{id}/resumo). Zero-preenchida dentro da janela solicitada.
     """
-    contagens = _contagens_inicio_atividade_por_territorio_mes(
-        session,
-        categoria_id=categoria_id,
-        categoria_por_codigo=categoria_por_codigo,
-        territorio_id=territorio_id,
-    )
-    return _zero_fill(contagens.get(territorio_id, {}), mes_referencia, meses_historico)
+    tabela = ContagemInicioAtividade
+    stmt = select(tabela.mes, func.sum(tabela.contagem)).where(tabela.territorio_id == territorio_id)
+    if categoria_id is not None:
+        stmt = stmt.where(tabela.categoria_id == categoria_id)
+    stmt = stmt.group_by(tabela.mes)
+
+    contagens = {mes: float(soma) for mes, soma in session.execute(stmt)}
+    return _zero_fill(contagens, mes_referencia, meses_historico)
 
 
 def series_aberturas_todos_bairros(
     session: Session,
     *,
     categoria_id: str | None,
-    categoria_por_codigo: dict[str, str],
     mes_referencia: date,
     meses_historico: int = MESES_HISTORICO_PADRAO,
 ) -> dict[str, list[PontoMensal]]:
     """Mesma série de serie_aberturas_bairro, mas pra todos os bairros de
     uma vez (uma query só) - usado pelo ranking, que precisa da série de
-    75 bairros; evitar 75 idas ao banco.
+    ~75 bairros; evita repetir a agregação por bairro.
     """
-    contagens = _contagens_inicio_atividade_por_territorio_mes(
-        session, categoria_id=categoria_id, categoria_por_codigo=categoria_por_codigo
-    )
+    tabela = ContagemInicioAtividade
+    stmt = select(tabela.territorio_id, tabela.mes, func.sum(tabela.contagem))
+    if categoria_id is not None:
+        stmt = stmt.where(tabela.categoria_id == categoria_id)
+    stmt = stmt.group_by(tabela.territorio_id, tabela.mes)
+
+    contagens: dict[str, dict[date, float]] = {}
+    for territorio_id, mes, soma in session.execute(stmt):
+        contagens.setdefault(territorio_id, {})[mes] = float(soma)
+
     return {
         territorio_id: _zero_fill(por_mes, mes_referencia, meses_historico)
         for territorio_id, por_mes in contagens.items()
@@ -157,7 +100,6 @@ def quebra_categoria_aberturas_bairro(
     *,
     territorio_id: str,
     mes_referencia: date,
-    categoria_por_codigo: dict[str, str],
     limite: int = 5,
 ) -> list[tuple[str | None, int]]:
     """As categorias que mais contribuíram pra aberturas (INICIO_ATIVIDADE)
@@ -165,37 +107,31 @@ def quebra_categoria_aberturas_bairro(
     inteiro. Retorna [(categoria_id, contagem), ...] desc; categoria_id
     None agrupa CNAEs não resolvidos (não descartados silenciosamente).
     """
-    tabela = ObservacaoEntidade
-    territorio_expr = tabela.atributos["territorio_id"].astext
-    inicio_expr = tabela.atributos["inicio_atividade"].astext
-    cnae_expr = tabela.atributos["cnae_principal"].astext
-
-    ultima_observacao = (
-        select(
-            tabela.entidade_id,
-            inicio_expr.label("inicio_atividade"),
-            cnae_expr.label("cnae_principal"),
-        )
-        .distinct(tabela.entidade_id)
-        .where(
-            tabela.fonte_id == FONTE_ID,
-            inicio_expr.isnot(None),
-            territorio_expr == territorio_id,
-        )
-        .order_by(tabela.entidade_id, tabela.observado_em.desc())
-        .subquery()
-    )
-    mes_expr = func.date_trunc("month", ultima_observacao.c.inicio_atividade.cast(Date))
+    tabela = ContagemInicioAtividade
     stmt = (
-        select(ultima_observacao.c.cnae_principal, func.count().label("contagem"))
-        .where(mes_expr == mes_referencia)
-        .group_by(ultima_observacao.c.cnae_principal)
+        select(tabela.categoria_id, func.sum(tabela.contagem).label("total"))
+        .where(tabela.territorio_id == territorio_id, tabela.mes == mes_referencia)
+        .group_by(tabela.categoria_id)
+        .order_by(func.sum(tabela.contagem).desc())
+        .limit(limite)
     )
+    return [(categoria_id, int(total)) for categoria_id, total in session.execute(stmt)]
 
-    por_categoria: dict[str | None, int] = {}
-    for row in session.execute(stmt):
-        codigo = normalizar_codigo_cnae(row.cnae_principal)
-        categoria_id = categoria_por_codigo.get(codigo)
-        por_categoria[categoria_id] = por_categoria.get(categoria_id, 0) + row.contagem
 
-    return sorted(por_categoria.items(), key=lambda item: item[1], reverse=True)[:limite]
+def substituir_contagem_inicio_atividade(
+    session: Session, linhas: list[tuple[str, str | None, date, int]]
+) -> int:
+    """linhas: [(territorio_id, categoria_id, mes, contagem), ...].
+    Recalcula do zero (delete + insert) - seguro porque a tabela é 100%
+    derivada de canonical.observacao_entidade, não é fonte de verdade.
+    """
+    session.execute(delete(ContagemInicioAtividade))
+    if not linhas:
+        return 0
+
+    rows = [
+        {"territorio_id": t, "categoria_id": c, "mes": m, "contagem": n}
+        for t, c, m, n in linhas
+    ]
+    session.execute(ContagemInicioAtividade.__table__.insert(), rows)
+    return len(rows)
