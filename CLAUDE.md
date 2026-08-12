@@ -34,11 +34,14 @@ editável) — `apps/api` importará de `src/` como biblioteca quando existir.
 
 ## Schema (resumo — DDL completo era o de referência do prompt original)
 
-- `canonical.entidade` — quem: `entidade_id`, `tipo_entidade`, `identificador_fonte`
-  (ex.: número do alvará), unique(`tipo_entidade`, `identificador_fonte`). **Ainda não
-  implementado.**
-- `canonical.observacao_entidade` — o que sabíamos e quando: `entidade_id`, `observado_em`,
-  `atributos JSONB`, `fonte_id`, `snapshot_ref`. Imutável. **Ainda não implementado.**
+- `canonical.entidade` — **implementado**. Quem: `entidade_id`, `tipo_entidade`,
+  `identificador_fonte` (ex.: número do alvará), unique(`tipo_entidade`,
+  `identificador_fonte`).
+- `canonical.observacao_entidade` — **implementado**. O que sabíamos e quando: `entidade_id`,
+  `observado_em`, `atributos JSONB`, `fonte_id`, `snapshot_ref`. Imutável. Constraint extra
+  (não estava no DDL de referência, adicionada deliberadamente): unique(`entidade_id`,
+  `fonte_id`, `observado_em`) com `ON CONFLICT DO NOTHING` no insert — reprocessar o mesmo
+  snapshot não duplica a observação, mas uma observação gravada nunca é atualizada/apagada.
 - `canonical.dim_territorio` — **implementado**. `territorio_id TEXT PK`, `nivel` (só
   `'bairro'` populado até agora), `nome`, `nome_alternativo TEXT[]`, `geometria
   GEOMETRY(MultiPolygon, 4326)`, `territorio_pai_id` (auto-FK), `cidade_id`.
@@ -63,6 +66,11 @@ implementar `FECHAMENTO_CONFIRMADO` (depende de uma segunda fonte que ainda não
 `data/raw/<fonte_id>/`, gitignored); `normalize(snapshot) -> list[...]` transforma em
 registros canônicos. **Nunca detecta evento aqui** — isso é responsabilidade de
 `src/domain/event/` (regra pura) orquestrada por `src/pipelines/event_detection/`.
+
+Para fontes muito grandes (ex.: `alvaras_smf`, ~545MB), `normalize()` pode ser um **gerador**
+em vez de retornar uma `list` (não carregar tudo em memória) e aceitar parâmetros extras
+(ex.: `territorio_id_por_slug`) além do `snapshot` — é um desvio deliberado da assinatura
+exata do `Protocol`, que não é estritamente verificada em runtime.
 
 ## Estado da implementação
 
@@ -104,18 +112,72 @@ registros canônicos. **Nunca detecta evento aqui** — isso é responsabilidade
   reprojeção, orientação de anéis/buracos/múltiplas partes, e paginação do conector
   (sessão HTTP falsa, sem depender da API real). Todos passando.
 
-### Próximo checkpoint: Checkpoint 2 — Entidade e observação (sem evento ainda)
+### Checkpoint 2 — Entidade e observação (sem evento ainda): **concluído**
 
-- Implementar `src/domain/entity/` e `src/domain/observation/`.
-- Implementar `src/infrastructure/connectors/alvaras_smf/`: fetch de um snapshot mensal
-  (streaming — arquivo tem centenas de MB, não pode ir para memória inteira nem para o
-  git), normalize para `Entidade` + `ObservacaoEntidade`, resolvendo `BAIRRO` contra
-  `canonical.dim_territorio` (usar `nome`/slug já gravado; divergências de grafia devem ser
-  **registradas**, não devem falhar o pipeline inteiro).
-- Confirmar uma amostra de 10–20 registros manualmente contra o CSV original antes de
-  considerar o checkpoint concluído.
-- Confirmar a URL exata do mês corrente no catálogo de dados abertos antes do fetch — não
-  hardcodar uma data.
+- `src/domain/entity/models.py` — dataclass `Entidade` pura. `entidade_id` é um candidato
+  gerado localmente (`uuid4`); se a entidade já existir no banco pela chave de negócio
+  (`tipo_entidade`, `identificador_fonte`), o id efetivamente usado é o já existente, não o
+  candidato — a resolução acontece em `entidade_repository.upsert_entidades` (upsert em lote
+  via `INSERT ... ON CONFLICT ... RETURNING`, deduplicado por chave de negócio dentro do
+  lote).
+- `src/domain/observation/models.py` — dataclass `ObservacaoEntidade` pura.
+- `src/infrastructure/database/orm/entidade.py`, `orm/observacao_entidade.py`,
+  `repositories/entidade_repository.py`, `repositories/observacao_repository.py`.
+- Migração `905d84c028ef` cria `canonical.entidade` e `canonical.observacao_entidade`.
+  `migrations/env.py` ganhou um filtro `include_object` para autogenerate ignorar as
+  extensões `postgis_tiger_geocoder`/`postgis_topology` pré-instaladas pela imagem
+  `postgis/postgis` (schemas `tiger`/`tiger_data`/`topology`/`public`), que não são
+  gerenciadas por este projeto.
+- `src/infrastructure/connectors/alvaras_smf/` — conector da Base de Alvarás (Curitiba/SMF).
+  - **Divergência da fonte vs. documentado** (usuário confirmou como prosseguir): o host
+    documentado originalmente (`mid.curitiba.pr.gov.br/dadosabertos/BaseAlvaras/`) não serve
+    mais o arquivo (403 no diretório, 404 no arquivo do mês corrente). O catálogo oficial
+    (`dadosabertos.curitiba.pr.gov.br/conjuntodado/detalhe/?chave=be211e1f-...`) aponta hoje
+    para um mirror do C3SL/UFPR: `dadosabertos.c3sl.ufpr.br/curitiba/BaseAlvaras/`. Nome do
+    arquivo e colunas batem exatamente com o documentado. `connector.py::_arquivo_mais_recente`
+    resolve a URL do mês corrente fazendo parse da listagem desse diretório (nunca hardcoda
+    data ou host).
+  - Também não documentado originalmente: delimitador é `;` (não vírgula), encoding é
+    **ISO-8859-1/latin-1** (não UTF-8), valores ausentes são `***` (não string vazia).
+  - `fetch()` baixa em streaming (chunks de 1MB direto pro disco) — arquivo tem ~545MB, nunca
+    vai inteiro pra memória. `normalize()` é um **gerador** que lê o CSV em chunks via pandas
+    e resolve `BAIRRO` contra `dim_territorio` por slug (reaproveita `slugify`, agora em
+    `infrastructure/connectors/text.py`, compartilhado entre conectores). Bairro sem
+    correspondência: fica com `territorio_id=None` no atributo e é logado em warning agregado
+    (uma vez por bairro não casado, não por linha) — não derruba o pipeline.
+  - `identificador_fonte` da entidade = `NUMERO_DO_ALVARA`. `tipo_entidade = "comercio"`.
+    `observado_em` da observação = data extraída do nome do arquivo (dia 1 do mês), não datas
+    de linha (`INICIO_ATIVIDADE`/`DATA_EMISSAO` são atributos da entidade, não a data do
+    snapshot).
+- `src/pipelines/ingestion/run_alvaras_smf.py` — orquestra em lotes de 5000: upsert de
+  entidade (resolve id real) → remapeia `entidade_id` da observação se necessário → insert de
+  observação.
+- **Rodado contra o arquivo real** (`2026-08-01_Alvaras_-_Base_de_Dados.csv`, 545MB):
+  513.293 linhas lidas, 511.361 observações gravadas (diferença = duplicatas de
+  `NUMERO_DO_ALVARA` na mesma referência mensal, bloqueadas pela constraint de idempotência).
+  94,0% das observações resolveram `territorio_id` (480.695 de 511.361); os ~6% restantes são
+  variações de grafia genuínas da fonte (`"CIC"`, `"Cidade Industrial"` vs.
+  `"CIDADE INDUSTRIAL DE CURITIBA"`, `"BAIRRO NAO INFORMADO"`, códigos numéricos soltos, etc.)
+  — logadas, não tratadas como erro.
+- **Conferência manual**: 15 registros escolhidos aleatoriamente no banco, comparados campo a
+  campo contra o CSV bruto original. 0 divergências.
+- 23 novos testes automatizados (`tests/domain/entity/`, `tests/domain/observation/`,
+  `tests/infrastructure/connectors/alvaras_smf/`) — parsing de data/valores ausentes,
+  resolução de URL do diretório, download em streaming, resolução/não-resolução de bairro,
+  linha sem `NUMERO_DO_ALVARA` ignorada. Total do projeto: 41 testes, todos passando.
+
+### Próximo checkpoint: Checkpoint 3 — Detecção de evento
+
+- Baixar um segundo snapshot de um mês diferente do já processado (`2026-08-01`) — usar
+  qualquer mês histórico ainda acessível no mirror C3SL/UFPR (`2026-07-01`, `2026-06-01`, etc.
+  já confirmados existentes no diretório).
+- Implementar `src/domain/event/` (regra pura: dado o histórico de observações de uma
+  entidade, qual evento resulta) com teste automatizado para cada `event_type` do catálogo:
+  `PRIMEIRA_OBSERVACAO`, `ABERTURA_CONFIRMADA`, `DESAPARECIMENTO`, `MUDANCA_CATEGORIA`. Não
+  implementar `FECHAMENTO_CONFIRMADO` (depende de segunda fonte que não existe ainda).
+- Implementar `src/pipelines/event_detection/` chamando essa regra sobre os dois snapshots.
+- Confirmar que o volume de `PRIMEIRA_OBSERVACAO`/`DESAPARECIMENTO` é plausível (ordem de
+  grandeza compatível com ~510 mil observações por snapshot) antes de seguir.
 
 ## Notas operacionais
 
@@ -123,4 +185,17 @@ registros canônicos. **Nunca detecta evento aqui** — isso é responsabilidade
   do projeto têm wheels compatíveis, confirmado por dry-run antes de instalar.
 - Docker Desktop precisa estar rodando para `docker compose up -d` funcionar; não estava
   ativo por padrão neste ambiente.
-- `data/raw/` é gitignored — nunca commitar snapshots brutos.
+- `data/raw/` é gitignored — nunca commitar snapshots brutos. O CSV de alvarás baixado
+  (~545MB) fica em `data/raw/alvaras_smf/` e não é commitado; rodar
+  `python -m pipelines.ingestion.run_alvaras_smf` de novo baixa o mês corrente outra vez.
+- O repositório está conectado a um remoto GitHub (`github.com/AironMattos/project_mercator`,
+  branch `main`) — aparentemente configurado via "Share on GitHub" do PyCharm durante a
+  sessão do checkpoint 1. Um commit "Initial commit" feito pela IDE capturou um arquivo de
+  scratch que vazou para o working directory; foi removido em commit separado
+  (`chore: remove cat.html`). Cuidado ao rodar comandos de investigação (curl, etc.) que
+  escrevam arquivos na raiz do projeto — preferir a pasta de scratchpad da sessão quando
+  possível, ou limpar antes de qualquer commit/sync com o remoto.
+- ORM: `server_default` de coluna UUID/timestamp que é uma *expressão* SQL (ex.:
+  `gen_random_uuid()`, `now()`) precisa ser `sa.text("...")`, nunca uma string Python pura —
+  Postgres tenta converter a string literal para o tipo da coluna e falha. Detectado e
+  corrigido em `orm/entidade.py`, `orm/observacao_entidade.py`, `orm/pipeline_run.py`.
