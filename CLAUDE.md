@@ -68,6 +68,16 @@ shadcn/ui + MapLibre GL JS + Recharts em `apps/web/` — ainda não iniciado (ch
   Sem PK de negócio (território/categoria podem ser nulos) - é 100% derivada de
   `fato_evento_territorial`, recomputada do zero (`DELETE` + `INSERT`) a cada execução, nunca
   atualizada linha a linha.
+- `analytics.contagem_inicio_atividade` — **implementado** (checkpoint 8, otimização de
+  2026-08-12). Mesmo padrão de `contagem_eventos` (100% derivada, `DELETE` + `INSERT`), mas
+  fonte diferente: `INICIO_ATIVIDADE` de `canonical.observacao_entidade.atributos`, não
+  `fato_evento_territorial` - dá profundidade real de anos ao indicador de aberturas mesmo com
+  poucos snapshots de evento processados (ver checkpoint 8b). `territorio_id` (FK, not null),
+  `categoria_id` (FK, nullable), `mes DATE`, `contagem INT`. Índice em `(territorio_id, mes)` -
+  é o padrão de leitura real da API. Gerada por
+  `python -m analytics.features.run_contagem_inicio_atividade` - precisa rodar de novo sempre
+  que um novo snapshot de alvarás for processado (mesma exigência operacional de
+  `run_contagem_eventos.py`, ver Notas operacionais).
 
 Catálogo de eventos do Radar de Comércio (`entity_type = "comercio"`) — **implementado**:
 `PRIMEIRA_OBSERVACAO`, `ABERTURA_CONFIRMADA`, `DESAPARECIMENTO`, `MUDANCA_CATEGORIA`.
@@ -590,6 +600,66 @@ acima). **Próximo checkpoint: 7d — deploy do frontend** (Vercel) - também ad
 frontend apontar pra ela em produção). Sem próximo checkpoint pendente localmente: os
 checkpoints 6a, 7a, 7b e 7c (tudo que dá pra fazer sem sair do localhost) estão completos.
 
+### Checkpoint 8a-8d — Ranking de crescimento e detalhe de bairro: **concluído**
+
+Um número absoluto ("234 aberturas em Batel") não diz se é muito, pouco, ou se está
+acelerando - faltavam três comparações: contra o próprio passado (baseline), contra o momento
+anterior (tendência), e contra os outros bairros (ranking). Implementado em 4 sub-checkpoints,
+cada um parado, testado e revisado antes do próximo.
+
+**8a - cálculo puro** (`src/analytics/features/indicadores.py`, sem I/O): `calcular_baseline`
+(média móvel, janela configurável, padrão 24 meses, excluindo o mês corrente da própria
+média), `calcular_tendencia` (últimos 3 meses fechados vs. os 3 anteriores, limiar de ±10%
+configurável) e `calcular_ranking` (ordena por `variacao_pct` - crescimento relativo, não
+volume absoluto, testado explicitamente que um bairro pequeno crescendo aparece à frente de um
+grande estável). Histórico insuficiente (`< 3` meses distintos na janela) retorna `None` com
+`motivo_indisponivel`, nunca `0` nem erro. Dois motivos de indisponibilidade:
+`historico_insuficiente` (poucos meses de dado) e `baseline_zero` (dado suficiente, mas a
+média é exatamente zero - divisão indefinida, não "infinita"). 21 testes.
+
+**8b - API** (`GET /ranking/comercio`, `GET /bairros/{territorio_id}/resumo`, `GET
+/metricas/comercio` estendido com `baseline`/`variacao_pct`/`tendencia`). Decisão de fonte de
+dado: o indicador de aberturas usa uma série derivada de `INICIO_ATIVIDADE` (real por
+registro, profundidade de anos mesmo com poucos snapshots), **não** o campo `aberturas`
+existente (baseado em evento de detecção, só tem profundidade a partir do par de snapshots já
+comparado) - os dois números podem divergir pro mesmo bairro/mês, decisão consciente, não bug.
+`saldo` continua vindo do caminho de evento existente e fica `historico_insuficiente`
+corretamente (limitação real de dado, 2 snapshots só). Motivo extra descoberto testando contra
+dado real: `mes_incompleto` - o mês do rótulo do snapshot mais recente (ex.: "2026-08-01") não
+tem cobertura real de `INICIO_ATIVIDADE` ainda (mesmo atraso de um mês do checkpoint 3); sem
+esse motivo dedicado, a API mostrava `"-100%"` ao lado de um número real de verdade. 7 testes
+de API (seed real de `entidade`/`observacao_entidade` em `conftest.py`).
+
+**8c - ranking no frontend**: nova aba "Ranking de crescimento" (Tabs do shadcn) ao lado do
+Mapa, reaproveitando o mesmo filtro de categoria (mesmo componente, mesmo estado). Sparkline de
+12 pontos (linha 2px neutra, marcador ≥8px na cor de destaque só no ponto atual) e regra de
+cor do delta implementada como função parametrizada (`corDelta(variacaoPct, cimaEBom)`) - não
+uma regra fixa "positivo = azul", preparada pra inverter caso um tile isolado de fechamento
+apareça algum dia. Paleta reaproveitada exatamente da do mapa (`AZUL_DESTAQUE`/
+`VERMELHO_DESTAQUE` em `palette.ts`, nenhuma paleta nova).
+
+**8d - detalhe de bairro expandido**: painel do checkpoint 7c ganhou cabeçalho com posição no
+ranking, stat tiles de aberturas (sempre com baseline/variação/tendência) e saldo (estado "em
+construção" explícito - *"dado de fechamento em construção — acompanhando mês a mês"* - quando
+histórico insuficiente, nunca omitido nem zero), e quebra por categoria em barras horizontais.
+Clique no mapa e clique numa linha do ranking levam ao mesmo painel - verificado visualmente
+nos dois caminhos.
+
+**Otimização de performance (mesmo dia, pedida pelo dono depois de usar a aba)**: abrir o
+ranking ou o painel de detalhe de um bairro levava 4-12s - `/ranking/comercio` e
+`/bairros/{id}/resumo` recomputavam ao vivo uma query cara (`DISTINCT ON` sobre ~515 mil
+observações) a cada request. Corrigido materializando `analytics.contagem_inicio_atividade`
+(mesmo padrão de `analytics.contagem_eventos` - ver Schema acima), gerada por
+`run_contagem_inicio_atividade.py`. **Resultado medido**: ranking com categoria nunca vista
+3,4s → 0,3s; abrir o painel de detalhe pela primeira vez 12s → 0,3s; aba Ranking no navegador
+(clique → lista renderizada) 323ms. Dado idêntico ao da query ao vivo, conferido bairro a
+bairro.
+
+**Rodado contra o banco/API/frontend reais**: CENTRO lidera o ranking com +89% (582 aberturas
+vs. baseline 307, "acelerando"); bairros pequenos como Ganchinho aparecem bem posicionados por
+crescimento relativo mesmo com volume baixo (5 aberturas) - o comportamento que o ranking por
+volume absoluto nunca mostraria. 122 testes passando, `npm run build`/`lint`/`tsc` limpos.
+
 ## Notas operacionais
 
 - Ambiente Python único disponível na máquina é 3.14 (via `py -0p`); todas as dependências
@@ -618,3 +688,15 @@ checkpoints 6a, 7a, 7b e 7c (tudo que dá pra fazer sem sair do localhost) estã
   senha `mercator`/`mercator`/`mercator` (mesmos valores de `.env.example`). Os dados de
   verdade estão nos schemas `canonical`, `events`, `infra` e `analytics` - `public` é só o
   padrão do Postgres/PostGIS.
+- **Depois de processar um novo snapshot de alvarás**, duas features derivadas precisam ser
+  recomputadas manualmente, nessa ordem (nenhuma roda automaticamente hoje):
+  `python -m analytics.features.run_contagem_eventos` (checkpoint 5) e
+  `python -m analytics.features.run_contagem_inicio_atividade` (checkpoint 8, otimização de
+  2026-08-12). Esquecer a segunda não quebra nada visivelmente - o ranking e o painel de
+  detalhe de bairro continuam respondendo rápido, só ficam com dado desatualizado (a query
+  antiga, ao vivo, foi removida - não há mais um fallback lento-mas-atualizado).
+- `uvicorn --reload` mostrou-se instável nesta máquina durante a sessão de 2026-08-12
+  (checkpoint 8b) - processos órfãos ficaram escutando a porta 8000 servindo código velho
+  depois de reinícios sucessivos, mascarando bugs reais por um tempo até serem percebidos via
+  `netstat`. Rodar sem `--reload` e reiniciar manualmente a cada mudança de backend é mais
+  confiável neste ambiente.
