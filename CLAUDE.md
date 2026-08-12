@@ -356,9 +356,15 @@ Depois de uma revisão, a sequência seguiu para uma segunda fase: API (FastAPI)
   `apps/api` adicionado a `pythonpath` do pytest (para os testes importarem `main`/
   `dependencies` sem hack de `sys.path`).
 
-**Próximo checkpoint: 6b — deploy da API** num free tier (Render/Railway/Fly.io), com
-`CORS_ORIGINS` já preparado para a URL do Vercel que vai existir no checkpoint 7d, e
-confirmação de que os três endpoints respondem a partir de uma rede externa (não localhost).
+**Checkpoint 6b (deploy da API) e 7d (deploy do frontend) adiados por decisão do dono**: nesta
+fase inicial não há necessidade de nenhuma URL pública — API e frontend rodam localmente
+(`uvicorn` local + Next.js `dev`, API local apontada via `NEXT_PUBLIC_API_URL`). Não é uma
+omissão, é a mesma decisão de "comece simples" do princípio 5, estendida ao deploy: sem banco
+hospedado (Supabase/Neon) provisionado ainda, sem Render/Vercel configurados. Retomar 6b/7d é
+trabalho futuro condicional, não bloqueia o restante da sequência (7a-7c seguem localmente).
+
+**Próximo checkpoint: 7a — esqueleto do frontend** (`apps/web/`, Next.js + TypeScript +
+Tailwind + shadcn/ui), consumindo a API local do checkpoint 6a.
 
 ## Notas operacionais
 
