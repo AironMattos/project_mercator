@@ -46,6 +46,17 @@ def upsert_territorios(session: Session, territorios: list[Territorio]) -> int:
     return len(rows)
 
 
+def nomes_por_territorio_id(session: Session, nivel: str | None = None) -> dict[str, str]:
+    """territorio_id -> nome, sem carregar geometria - pro ranking e
+    resumo de bairro, que só precisam do nome pra exibição, não do
+    polígono inteiro (carregar 75 MultiPolygon só pra rotular uma lista é
+    desperdício)."""
+    query = session.query(DimTerritorio.territorio_id, DimTerritorio.nome)
+    if nivel is not None:
+        query = query.filter(DimTerritorio.nivel == nivel)
+    return {row.territorio_id: row.nome for row in query.all()}
+
+
 def list_territorios(session: Session, nivel: str | None = None) -> list[Territorio]:
     query = session.query(DimTerritorio)
     if nivel is not None:
