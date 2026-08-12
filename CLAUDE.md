@@ -512,6 +512,78 @@ trabalho futuro condicional, não bloqueia o restante da sequência (7a-7c segue
   valia pro resto do produto, só não tinha sido aplicado dentro do próprio MapLibre ainda.
   `npm run build`/`lint` seguem limpos.
 
+### Sessão de 2026-08-12 — dois bugs reais encontrados e corrigidos (mapa + métrica)
+
+Pedido do dono: abrir `localhost:3000` e checar o mapa. A checagem automatizada (Playwright
+headless, já que a extensão Claude em Chrome segue indisponível nesta máquina) achou o mapa
+**em branco de novo**, apesar do checkpoint 7c acima já ter corrigido um bug de mapa em branco
+- causa raiz diferente dessa vez, não o `demotiles.maplibre.org`.
+
+**Bug 1 - altura CSS colapsada.** `apps/web/src/app/layout.tsx` (`<body>`) e o wrapper raiz de
+`dashboard.tsx` usavam `min-h-full`/`min-h-screen` em vez de `h-full`/`h-screen`. `min-height`
+nunca é tratado como tamanho CSS "definido" (mesmo quando o valor renderizado bate com o
+esperado) - toda a cadeia de `flex-1` até o container do MapLibre ficava sem altura resolvível
+pra propósito de resolução de porcentagem, e os `<div className="h-full w-full">` do mapa
+colapsavam pra 0px, silenciosamente (confirmado isolando o problema com `getComputedStyle`/
+`getBoundingClientRect` num elemento sintético injetado na própria árvore da página - até
+`height: 100% !important` inline não resolvia contra aquele container). Corrigido trocando os
+dois pra `h-full`/`h-screen`.
+
+**Bug 2 - worker do MapLibre nunca carregava.** Corrigida a altura, o mapa aparecia mas sem
+nenhum bairro colorido - só o `background`. MapLibre GL JS v6 localiza seu worker de
+processamento de GeoJSON via `import.meta.url` do próprio chunk (`new Worker(url, {type:
+"module"})`); isso não resolve pra uma URL http(s) real sob o bundler do Next.js/Turbopack -
+confirmado interceptando o construtor `Worker` no navegador: a URL passada era `""` (string
+vazia), then reproduzido tanto em `next dev` quanto em `next build && next start` (não é
+limitação só de dev). Sem o worker, o GeoJSON dos 75 bairros nunca é "tilado" -
+`map.isSourceLoaded()` fica `false` pra sempre, `queryRenderedFeatures()` devolve 0, sem
+nenhum evento de erro disparado. Corrigido servindo uma cópia estática do worker (e do chunk
+`maplibre-gl-shared.mjs` do qual ele importa) em `apps/web/public/` via script `postinstall`
+(`apps/web/scripts/copy-maplibre-worker.mjs`, copia de `node_modules/maplibre-gl/dist/` -
+gitignored, não é código-fonte do projeto) e apontando `setWorkerUrl("/maplibre-gl-worker.mjs")`
+antes de criar o `Map`.
+
+**Achado à parte, motivado por uma auditoria pedida pelo dono** (o mapa mostrava saldo negativo
+em todo bairro de Curitiba nos "últimos 12 meses", CENTRO em -191 - suspeita inicial do dono:
+`DESAPARECIMENTO` estaria usando `DATA_EXPIRACAO` do alvará como proxy de fechamento em vez de
+comparação real de snapshots). Investigação com queries brutas contra o banco real + leitura
+literal do código, sem alterar nada até a causa ser confirmada:
+
+- **Hipótese do `DATA_EXPIRACAO` como proxy: descartada.** `grep` mostra esse campo gravado só
+  como atributo passivo do JSONB da observação - nenhum `if`/filtro o usa em
+  `domain/event/regras.py` nem na orquestração. `DESAPARECIMENTO` é mesmo derivado de
+  comparação real de snapshots (confirmado numa amostra manual de 8 entidades do Centro: todas
+  têm exatamente 1 observação, datada 2026-07-01, ausente em 2026-08-01).
+- **O padrão observado é real, mas o rótulo do filtro era enganoso.** Só existem 2 snapshots
+  processados (`2026-07-01`, `2026-08-01`) - todo evento tem `data_evento = 2026-08-01`. O
+  preset "últimos 12 meses" capturava tudo porque agosto cai dentro da janela, não porque haja
+  atividade distribuída ao longo de um ano. **Corrigido**: novo endpoint `GET
+  /metricas/cobertura` (`feature_repository.consultar_cobertura_temporal` - primeiro/último mês
+  com evento em `analytics.contagem_eventos`); o dashboard mostra isso sempre, junto ao filtro
+  de período ("Dados reais processados: ago/2026 — o período acima é só o filtro...").
+- **Achado real e distinto, confirmado**: `analytics/features/contagem_eventos.py`
+  (`TIPOS_CONSIDERADOS`) só incluía `PRIMEIRA_OBSERVACAO` e `DESAPARECIMENTO` desde o
+  checkpoint 5 - decisão de escopo documentada naquele checkpoint, mas com um efeito colateral
+  não percebido até agora: `ABERTURA_CONFIRMADA` (confiança **alta**, abertura genuína
+  confirmada por `INICIO_ATIVIDADE`) nunca chegava a `analytics.contagem_eventos`, então o
+  campo `aberturas` que a API expõe e o mapa colore somava só `PRIMEIRA_OBSERVACAO` (confiança
+  **baixa** - "entidade nunca vista antes, sem prova de quando abriu"). **Corrigido** incluindo
+  `ABERTURA_CONFIRMADA` em `TIPOS_CONSIDERADOS` e na agregação SQL de
+  `feature_repository.consultar_metricas_comercio` (`aberturas` agora soma os dois tipos;
+  `desaparecimentos` não mudou). Confirmado sem dupla-contagem: os dois tipos são mutuamente
+  exclusivos por entidade (query `HAVING COUNT(DISTINCT event_type) > 1` devolveu 0 linhas).
+  Recomputado `analytics.contagem_eventos` (`python -m analytics.features.run_contagem_eventos`)
+  contra o banco real - **efeito concreto**: CENTRO vira saldo **+391** (era -191; aberturas
+  798 = 216 `PRIMEIRA_OBSERVACAO` + 582 `ABERTURA_CONFIRMADA`, fechamentos 407 inalterado). O
+  mapa inteiro mudou de perfil - a maioria dos bairros hoje tende a neutro/azul.
+
+**Rodado contra o banco/API/frontend reais**: 94 testes passando (2 novos - regressão de
+`aberturas` incluindo confiança alta, e o endpoint de cobertura), `npm run build`/`lint`
+limpos. Verificado via Playwright headless (screenshot + inspeção do estado real do MapLibre,
+não só ausência de erro): mapa renderiza os 75 bairros coloridos, hover mostra popup com
+número certo, clique abre o painel de detalhe, filtro de categoria/período recolore o mapa,
+CENTRO confirmado em "+391 (aberturas 798, fechamentos 407)" no popup depois da correção.
+
 **Deploy (6b/7d) segue adiado por decisão do dono** — tudo roda local por enquanto (ver nota
 acima). **Próximo checkpoint: 7d — deploy do frontend** (Vercel) - também adiado junto com o
 6b; quando o dono decidir retomar, os dois andam juntos (a API precisa estar pública antes do
