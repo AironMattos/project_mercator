@@ -213,17 +213,64 @@ exata do `Protocol`, que não é estritamente verificada em runtime.
   ausência de evento quando CNAE não muda ou está incompleto, validação do domínio `Evento`.
   Total do projeto: 57 testes, todos passando.
 
-### Próximo checkpoint: Checkpoint 4 — CNAE e categoria
+### Checkpoint 4 — CNAE e categoria: **concluído**
 
-- Implementar `src/commerce/cnae/` (carregar a tabela oficial de CNAE — citar a fonte usada).
-- Implementar `src/commerce/categories/` (mapeamento de CNAE para ~20-30 categorias legíveis —
-  começar com uma lista pequena e explícita).
-- Ligar isso ao `payload` dos eventos de comércio (hoje `MUDANCA_CATEGORIA` grava
-  `cnae_anterior`/`cnae_atual` como códigos crus - ver se vale a pena também resolver a
-  categoria legível ali).
-- Atenção: os CNAEs observados no dado real têm pelo menos dois formatos de exibição
-  diferentes na mesma fonte (ex.: `"5-70.20.00"` vs `"C.26.5.1-5/00-00"`) — normalizar isso é
-  provavelmente pré-requisito para o mapeamento funcionar bem.
+- **Formato de CNAE da fonte decifrado** (nem o prompt original nem o "dicionário de dados"
+  publicado pela própria SMF documentam esse campo). Investigando o dado real (~511 mil
+  observações de 2026-08): ~97% dos códigos distintos seguem o formato
+  `<seção A-U>.<divisão 2d>.<grupo 1d>.<classe 1d>-<dv 1d>/<subclasse 2d>-<sufixo "00">`
+  (ex.: `"S.96.0.2-5/01-00"`); concatenando divisão+grupo+classe+dv+subclasse dá exatamente o
+  código de 7 dígitos que a API do IBGE usa - **confirmado comparando três casos reais contra
+  descrições oficiais conhecidas** (cabeleireiros, padaria com produção própria, padaria com
+  revenda - todos bateram exatamente). Os ~3% restantes (`"5-70.20.00"`) e um placeholder óbvio
+  (`"X.88.8.8-8/88-88"` - seção "X" não existe na CNAE oficial, que vai só até "U") não
+  correspondem a nenhum código real; ficam como não resolvidos (`None`), mesmo tratamento dado
+  a divergências de bairro no checkpoint 2. **Achado durante os testes**: a primeira versão do
+  regex aceitava qualquer letra `A-Z` como seção, então o placeholder "X..." normalizava
+  silenciosamente para um código inexistente (`"8888888"`) - pego por
+  `test_placeholder_nao_reconhecido_retorna_none`, corrigido restringindo a seção a `A-U`. Não
+  afetou nenhum resultado já gravado (esse código nunca esteve no mapeamento de categorias).
+- `src/commerce/cnae/` — `Cnae` (dataclass pura) e
+  `normalizar_codigo_cnae()` (regra pura, só regex, sem I/O).
+- `src/infrastructure/connectors/ibge_cnae/` — conector da tabela oficial de CNAE, via API
+  pública do IBGE (`servicodados.ibge.gov.br/api/v2/cnae/subclasses`, sem chave). Fonte
+  estática (`cadencia = "estatica"`).
+- `src/commerce/categories/` — 26 categorias legíveis (`CATEGORIAS`) e um mapeamento explícito
+  de 79 códigos CNAE (`MAPEAMENTO_CNAE_CATEGORIA`) — os códigos mais frequentes nas
+  observações reais de agosto/2026, cobrindo ~65% das observações com CNAE normalizável. Lista
+  pequena e explícita de propósito (conforme pedido no checkpoint) - não tenta cobrir as
+  ~1300 subclasses oficiais.
+- `src/infrastructure/database/orm/dim_cnae.py`, `dim_categoria.py`, `cnae_categoria_map.py` +
+  repositórios correspondentes. Migração `0ab71b50497e` cria as três tabelas.
+- `src/pipelines/ingestion/run_ibge_cnae.py` (fetch+normalize+upsert de `dim_cnae`) e
+  `run_categorias.py` (semeia `dim_categoria`/`cnae_categoria_map` a partir do mapeamento
+  estático - precisa rodar depois de `run_ibge_cnae`, já que há FK para `dim_cnae`).
+- **Payload dos eventos de comércio enriquecido com categoria**: `pipelines/event_detection/
+  run_comercio.py` resolve `categoria_id` (via `normalizar_codigo_cnae` + o mapeamento
+  carregado do banco) e injeta no `payload` de todo evento, não só `MUDANCA_CATEGORIA` — usa
+  o CNAE da observação atual (ou da última observação conhecida, para `DESAPARECIMENTO`). A
+  resolução acontece na orquestração do pipeline, não em `domain/event/regras.py`, que
+  continua puro e sem depender de `commerce/`.
+- **Rodado contra dado real**: 1.332 subclasses CNAE gravadas (IBGE), 26 categorias + 79
+  mapeamentos gravados. Eventos reprocessados: dos 511.361 registros de agosto, 66,4% têm CNAE
+  normalizável e 44,4% têm categoria resolvida; dos 6.697 eventos gravados, 4.212 (63%)
+  carregam `categoria_id` no payload.
+- 22 novos testes automatizados (`tests/commerce/cnae/`, `tests/commerce/categories/`,
+  `tests/infrastructure/connectors/ibge_cnae/`) — normalização com casos reais validados
+  contra descrições oficiais, rejeição do formato legado e do placeholder, consistência do
+  mapeamento categoria↔código, conector com sessão HTTP falsa. Total do projeto: 77 testes,
+  todos passando.
+
+### Próximo checkpoint: Checkpoint 5 — Primeira feature
+
+- Implementar `src/analytics/features/` com uma única métrica: contagem de
+  `PRIMEIRA_OBSERVACAO` e `DESAPARECIMENTO` por bairro (`territorio_id`) e por categoria
+  (`payload->>'categoria_id'`), por mês. Os dois já estão prontos para isso -
+  `events.fato_evento_territorial` tem `territorio_id` como coluna própria e `categoria_id`
+  já vem no `payload` desde este checkpoint.
+- Não implementar quociente locacional nem Signal Engine ainda - confirmar que a métrica mais
+  simples possível já conta uma história coerente antes de empilhar mais em cima.
+- Depois deste checkpoint, parar e aguardar revisão antes de seguir para API ou front-end.
 
 ## Notas operacionais
 
