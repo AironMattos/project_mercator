@@ -9,6 +9,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { ChoroplethMap } from "@/components/choropleth-map";
 import { DetailPanel } from "@/components/detail-panel";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { RankingList } from "@/components/ranking-list";
 import { SaldoLegend } from "@/components/saldo-legend";
 import {
   Select,
@@ -18,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getCategorias,
   getCoberturaTemporal,
@@ -29,6 +31,8 @@ import {
   type MetricaComercio,
 } from "@/lib/api";
 import { formatarMesAno, intervaloUltimosMeses, PRESETS_PERIODO } from "@/lib/periodo";
+
+type Aba = "mapa" | "ranking";
 
 const TODAS_CATEGORIAS = "todas";
 const PERIODO_CUSTOM = "custom";
@@ -83,6 +87,7 @@ export function Dashboard() {
   const [intervaloCustom, setIntervaloCustom] = useState<DateRange | undefined>(undefined);
   const [popoverAberto, setPopoverAberto] = useState(false);
   const [selecionado, setSelecionado] = useState<{ id: string; nome: string } | null>(null);
+  const [aba, setAba] = useState<Aba>("mapa");
 
   const { dataInicio, dataFim } = useMemo(() => {
     if (presetPeriodo === PERIODO_CUSTOM && intervaloCustom?.from && intervaloCustom.to) {
@@ -153,13 +158,33 @@ export function Dashboard() {
     }
   }
 
+  // Clique numa linha do ranking já vem com o nome (a API devolve) - não
+  // precisa procurar no GeoJSON como o clique no mapa. Os dois caminhos
+  // levam ao mesmo DetailPanel, só a origem do nome muda.
+  function selecionarTerritorioComNome(territorioId: string, nome: string) {
+    setSelecionado({ id: territorioId, nome });
+  }
+
   return (
     <div className="flex h-screen flex-col">
-      <header className="border-b px-6 py-4">
-        <h1 className="text-lg font-semibold">Radar de Comércio — Curitiba</h1>
-        <p className="text-sm text-muted-foreground">
-          Abertura e fechamento de estabelecimentos por bairro e categoria
-        </p>
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-6 py-4">
+        <div>
+          <h1 className="text-lg font-semibold">Radar de Comércio — Curitiba</h1>
+          <p className="text-sm text-muted-foreground">
+            Abertura e fechamento de estabelecimentos por bairro e categoria
+          </p>
+        </div>
+        <Tabs
+          value={aba}
+          onValueChange={(valor) => {
+            if (valor) setAba(valor as Aba);
+          }}
+        >
+          <TabsList>
+            <TabsTrigger value="mapa">Mapa</TabsTrigger>
+            <TabsTrigger value="ranking">Ranking de crescimento</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </header>
 
       <div className="flex flex-wrap items-center gap-3 border-b px-6 py-3">
@@ -184,54 +209,58 @@ export function Dashboard() {
           </SelectContent>
         </Select>
 
-        <Select
-          value={presetPeriodo}
-          onValueChange={(valor) => {
-            if (!valor) return;
-            setPresetPeriodo(valor);
-            if (valor === PERIODO_CUSTOM) setPopoverAberto(true);
-          }}
-        >
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Período" />
-          </SelectTrigger>
-          <SelectContent>
-            {PRESETS_PERIODO.map((preset) => (
-              <SelectItem key={preset.value} value={preset.value}>
-                {preset.label}
-              </SelectItem>
-            ))}
-            <SelectItem value={PERIODO_CUSTOM}>Personalizado…</SelectItem>
-          </SelectContent>
-        </Select>
+        {aba === "mapa" && (
+          <>
+            <Select
+              value={presetPeriodo}
+              onValueChange={(valor) => {
+                if (!valor) return;
+                setPresetPeriodo(valor);
+                if (valor === PERIODO_CUSTOM) setPopoverAberto(true);
+              }}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Período" />
+              </SelectTrigger>
+              <SelectContent>
+                {PRESETS_PERIODO.map((preset) => (
+                  <SelectItem key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </SelectItem>
+                ))}
+                <SelectItem value={PERIODO_CUSTOM}>Personalizado…</SelectItem>
+              </SelectContent>
+            </Select>
 
-        {presetPeriodo === PERIODO_CUSTOM && (
-          <Popover open={popoverAberto} onOpenChange={setPopoverAberto}>
-            <PopoverTrigger className={buttonVariants({ variant: "outline", size: "sm" })}>
-              {intervaloCustom?.from && intervaloCustom.to
-                ? `${formatarDataCurta(dataInicio)} – ${formatarDataCurta(dataFim)}`
-                : "Escolher intervalo"}
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="range"
-                selected={intervaloCustom}
-                onSelect={(range) => {
-                  setIntervaloCustom(range);
-                  if (range?.from && range?.to) setPopoverAberto(false);
-                }}
-                numberOfMonths={2}
-              />
-            </PopoverContent>
-          </Popover>
+            {presetPeriodo === PERIODO_CUSTOM && (
+              <Popover open={popoverAberto} onOpenChange={setPopoverAberto}>
+                <PopoverTrigger className={buttonVariants({ variant: "outline", size: "sm" })}>
+                  {intervaloCustom?.from && intervaloCustom.to
+                    ? `${formatarDataCurta(dataInicio)} – ${formatarDataCurta(dataFim)}`
+                    : "Escolher intervalo"}
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="range"
+                    selected={intervaloCustom}
+                    onSelect={(range) => {
+                      setIntervaloCustom(range);
+                      if (range?.from && range?.to) setPopoverAberto(false);
+                    }}
+                    numberOfMonths={2}
+                  />
+                </PopoverContent>
+              </Popover>
+            )}
+
+            <span className="ml-auto text-xs text-muted-foreground">
+              {formatarDataCurta(dataInicio)} – {formatarDataCurta(dataFim)}
+            </span>
+          </>
         )}
-
-        <span className="ml-auto text-xs text-muted-foreground">
-          {formatarDataCurta(dataInicio)} – {formatarDataCurta(dataFim)}
-        </span>
       </div>
 
-      {base.status === "pronto" && (
+      {aba === "mapa" && base.status === "pronto" && (
         <div className="border-b px-6 py-1.5 text-xs text-muted-foreground">
           Dados reais processados: {textoCobertura(base.cobertura)} — o período acima é
           só o filtro, pode não ter evento em todo o intervalo.
@@ -257,7 +286,7 @@ export function Dashboard() {
           </Alert>
         )}
 
-        {base.status === "pronto" && base.territorios.features.length === 0 && (
+        {base.status === "pronto" && aba === "mapa" && base.territorios.features.length === 0 && (
           <Alert>
             <AlertTitle>Nenhum território encontrado</AlertTitle>
             <AlertDescription>
@@ -266,7 +295,7 @@ export function Dashboard() {
           </Alert>
         )}
 
-        {base.status === "pronto" && base.territorios.features.length > 0 && (
+        {base.status === "pronto" && aba === "mapa" && base.territorios.features.length > 0 && (
           <div className="flex flex-1 flex-col gap-3">
             {metricas.status === "erro" && (
               <Alert variant="destructive">
@@ -296,6 +325,13 @@ export function Dashboard() {
               </>
             )}
           </div>
+        )}
+
+        {base.status === "pronto" && aba === "ranking" && (
+          <RankingList
+            categoriaId={categoriaFiltro}
+            onSelecionarTerritorio={selecionarTerritorioComNome}
+          />
         )}
       </main>
 

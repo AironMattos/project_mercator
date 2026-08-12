@@ -39,6 +39,15 @@ export const RAMPA_VERMELHA = [
 
 export const NEUTRO_SALDO_ZERO = "#f0efec";
 
+// Hex simples (não expressão MapLibre) da mesma paleta divergente, pros
+// stat tiles do ranking/detalhe de bairro (checkpoint 8c/8d) - "reaproveite
+// exatamente a divergente já validada para o mapa", não uma paleta nova.
+// Degrau 4 de cada braço (0-indexado) = os tons "de destaque" que a seção
+// 3.2 do prompt de referência cita explicitamente (#2a78d6 azul, #e34948
+// vermelho).
+export const AZUL_DESTAQUE = RAMPA_AZUL[3];
+export const VERMELHO_DESTAQUE = RAMPA_VERMELHA[4];
+
 /**
  * Expressão de estilo MapLibre para colorir por saldo líquido: interpola
  * cada braço a partir do zero (cinza neutro) até o extremo dos dados no
