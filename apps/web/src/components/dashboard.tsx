@@ -42,8 +42,8 @@ type EstadoMetricas =
   | { status: "pronto"; metricas: MetricaComercio[] };
 
 function formatarDataCurta(iso: string): string {
-  const [, m, d] = iso.split("-");
-  return `${d}/${m}`;
+  const [ano, m, d] = iso.split("-");
+  return `${d}/${m}/${ano.slice(2)}`;
 }
 
 export function Dashboard() {
