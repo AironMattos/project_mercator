@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -12,6 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChoroplethMap } from "@/components/choropleth-map";
+import { SaldoLegend } from "@/components/saldo-legend";
 import {
   getCategorias,
   getMetricasComercio,
@@ -110,9 +111,15 @@ export function Dashboard() {
             ))}
           </SelectContent>
         </Select>
+
+        {estado.status === "pronto" && (
+          <span className="text-xs text-muted-foreground">
+            filtros ainda não ligados ao mapa — checkpoint 7c
+          </span>
+        )}
       </div>
 
-      <main className="flex-1 p-6">
+      <main className="flex flex-1 flex-col p-6">
         {estado.status === "carregando" && (
           <div className="space-y-3" role="status" aria-label="Carregando">
             <Skeleton className="h-8 w-64" />
@@ -141,31 +148,14 @@ export function Dashboard() {
         )}
 
         {estado.status === "pronto" && estado.territorios.features.length > 0 && (
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Card>
-              <CardHeader>
-                <CardTitle>Territórios</CardTitle>
-              </CardHeader>
-              <CardContent className="text-3xl font-semibold">
-                {estado.territorios.features.length}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Categorias</CardTitle>
-              </CardHeader>
-              <CardContent className="text-3xl font-semibold">
-                {estado.categorias.length}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Bairros com métrica agregada</CardTitle>
-              </CardHeader>
-              <CardContent className="text-3xl font-semibold">
-                {estado.metricas.length}
-              </CardContent>
-            </Card>
+          <div className="flex flex-1 flex-col gap-3">
+            <SaldoLegend
+              minSaldo={Math.min(0, ...estado.metricas.map((m) => m.saldo))}
+              maxSaldo={Math.max(0, ...estado.metricas.map((m) => m.saldo))}
+            />
+            <div className="min-h-[520px] flex-1 overflow-hidden rounded-md border">
+              <ChoroplethMap territorios={estado.territorios} metricas={estado.metricas} />
+            </div>
           </div>
         )}
       </main>

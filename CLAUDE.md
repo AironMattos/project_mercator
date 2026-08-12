@@ -405,9 +405,58 @@ trabalho futuro condicional, não bloqueia o restante da sequência (7a-7c segue
   vistos renderizados de fato. Pedir para o dono abrir `http://localhost:3000` (com a API
   rodando) e confirmar visualmente antes de considerar o checkpoint fechado de verdade.
 
+### Checkpoint 7b — Mapa coroplético: **concluído**
+
+- `src/lib/palette.ts` — a codificação divergente da seção 4.2 do prompt de referência.
+  Braço azul (saldo positivo) é literal da spec. **Braço vermelho não estava na spec** (só o
+  degrau intermediário `#e34948` estava fixado) - construído com o skill `dataviz`: mesma
+  contagem de degraus do azul (9), hue único (~21-28°), luminosidade estritamente monotônica
+  claro→escuro, degrau 5 pinado no hex exato `#e34948`. Validado com
+  `validate_palette.js --ordinal` (checa monotonicidade de L, que é o que importa para uma
+  rampa sequencial/divergente - o skill documenta que os outros checks do modo ordinal, feitos
+  pra marcas discretas lado a lado, falham "by design" numa rampa contínua e não são o
+  critério aqui; a própria rampa azul de referência do skill falha os mesmos checks). Nenhum
+  degrau fora do gamute sRGB (checado explicitamente - a primeira tentativa estourava gamute
+  nos dois degraus mais claros, corrigido reduzindo o chroma alvo desses dois pontos).
+  `expressaoCorPorSaldo(min, max)` gera a expressão MapLibre `interpolate`/`linear` com os 18
+  degraus (9+9) mais o cinza neutro no zero, escalados pelos extremos reais do período
+  filtrado (nunca um domínio fixo).
+- `src/components/choropleth-map.tsx` — MapLibre GL JS (`maplibre-gl` v6; a API atual não tem
+  mais export default, é `import { Map, NavigationControl, Popup, LngLatBounds } from
+  "maplibre-gl"`, diferente de versões mais antigas). Estilo base:
+  `https://demotiles.maplibre.org/style.json` (demo tiles oficiais do próprio MapLibre - sem
+  token, mas é uma dependência de rede externa; se isso for um problema no futuro, dá pra
+  trocar por um estilo em branco ou auto-hospedado). Uma fonte GeoJSON (`/territorios`) com o
+  `saldo`/`aberturas`/`desaparecimentos` de `/metricas/comercio` (sem `territorio_id`,
+  agregado por bairro) injetados nas `properties` de cada feature antes do `setData` -
+  bairro sem nenhum evento no período vira `saldo=0` (cai exatamente no cinza neutro da
+  expressão, sem precisar de um caso especial) e fica marcado com `temDado=false` só para o
+  texto do popup ("sem evento no período" em vez de "saldo 0"). Popup no hover (nome do
+  bairro + saldo/aberturas/fechamentos), clique emite `territorio_id` via callback
+  (`onSelecionarTerritorio`, ainda sem consumidor - é o gancho para o painel de detalhe do
+  checkpoint 7c). `fitBounds` calculado a partir da geometria real dos 75 bairros, não um
+  centro/zoom chumbado.
+- `src/components/saldo-legend.tsx` — gradiente simples (vermelho escuro → cinza → azul
+  escuro) com os extremos reais do período, sempre visível acima do mapa (a recomendação do
+  skill `dataviz` de legenda sempre presente, adaptada pra uma rampa contínua em vez de
+  categórica).
+- `dashboard.tsx`: as 3 cards de conferência do checkpoint 7a foram substituídas pelo mapa de
+  verdade. Filtros de categoria/período continuam na tela mas **ainda não ligados** ao mapa -
+  isso é trabalho do checkpoint 7c por definição do prompt de referência, não esquecimento (a
+  UI mostra um aviso "filtros ainda não ligados ao mapa" enquanto isso).
+- **Rodado localmente**: `npm run build` compila e type-checa sem erro; `npm run lint` sem
+  avisos; confirmado via `curl` que `/territorios` devolve ~1,87MB de GeoJSON (75 bairros,
+  aceitável para carregar uma vez no cliente) e que `demotiles.maplibre.org` (a fonte do
+  estilo base) está acessível. **Verificação visual de novo não foi feita por mim** - mesma
+  limitação do checkpoint 7a (sem Chrome disponível nesta sessão). Pedir para o dono abrir
+  `http://localhost:3000` (com a API local rodando) e confirmar visualmente: bairros com mais
+  aberturas tendendo ao azul, bairros com mais fechamentos tendendo ao vermelho, hover
+  mostrando popup com o nome do bairro.
+
 **Deploy (6b/7d) segue adiado por decisão do dono** — tudo roda local por enquanto (ver nota
-acima). **Próximo checkpoint: 7b — mapa coroplético** (MapLibre GL JS, `/territorios` +
-`/metricas/comercio` sem `territorio_id`, codificação divergente da seção 4.2).
+acima). **Próximo checkpoint: 7c — painel de detalhe** (clique no bairro abre um painel
+lateral com série temporal em Recharts; liga os filtros de categoria/período ao mapa e ao
+painel pela primeira vez).
 
 ## Notas operacionais
 
