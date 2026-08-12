@@ -122,7 +122,7 @@ export function Dashboard() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex h-screen flex-col">
       <header className="border-b px-6 py-4">
         <h1 className="text-lg font-semibold">Radar de Comércio — Curitiba</h1>
         <p className="text-sm text-muted-foreground">

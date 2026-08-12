@@ -8,6 +8,7 @@ import {
   Map as MaplibreMap,
   NavigationControl,
   Popup,
+  setWorkerUrl,
   type GeoJSONSource,
 } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
@@ -15,6 +16,14 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { GeoJsonFeatureCollection, MetricaComercio } from "@/lib/api";
 import { expressaoCorPorSaldo, NEUTRO_SALDO_ZERO } from "@/lib/palette";
+
+// MapLibre localiza seu worker via `import.meta.url` do próprio chunk - sob o
+// bundler do Next.js (Turbopack, dev e build) isso não resolve para uma URL
+// http(s) real, então o worker nunca carrega e as camadas de dado (fill/linha)
+// nunca renderizam (fica só o background, sem erro nenhum). Servindo uma cópia
+// estática do worker (script `postinstall`, ver package.json) e apontando para
+// ela explicitamente, contornamos essa detecção quebrada.
+setWorkerUrl("/maplibre-gl-worker.mjs");
 
 type ChoroplethMapProps = {
   territorios: GeoJsonFeatureCollection;
