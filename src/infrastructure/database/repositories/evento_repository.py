@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -38,3 +41,24 @@ def insert_eventos(session: Session, eventos: list[Evento]) -> int:
     )
     resultado = session.execute(stmt)
     return resultado.rowcount or 0
+
+
+def iter_eventos(session: Session) -> Iterator[Evento]:
+    """Lê todos os eventos gravados. A tabela é pequena (milhares de
+    linhas, não milhões como observação) - não precisa de streaming, mas
+    usamos yield_per para não instanciar tudo de uma vez ainda assim.
+    """
+    tabela = FatoEventoTerritorialORM
+    stmt = select(tabela).execution_options(yield_per=2000)
+    for row in session.execute(stmt).scalars():
+        yield Evento(
+            entity_type=row.entity_type,
+            event_type=row.event_type,
+            entidade_id=row.entidade_id,
+            territorio_id=row.territorio_id,
+            data_evento=row.data_evento,
+            confianca=row.confianca,
+            origem_observacoes=tuple(row.origem_observacoes),
+            payload=row.payload,
+            evento_id=row.evento_id,
+        )

@@ -18,6 +18,7 @@ from infrastructure.database.orm import fato_evento_territorial  # noqa: F401
 from infrastructure.database.orm import dim_cnae  # noqa: F401
 from infrastructure.database.orm import dim_categoria  # noqa: F401
 from infrastructure.database.orm import cnae_categoria_map  # noqa: F401
+from infrastructure.database.orm import contagem_eventos  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -39,7 +40,7 @@ target_metadata = Base.metadata
 # postgis_topology pré-instaladas, que criam dezenas de tabelas em
 # tiger/tiger_data/topology/public. Autogenerate só deve enxergar os
 # schemas que o projeto de fato gerencia.
-SCHEMAS_GERENCIADOS = {"canonical", "events", "infra"}
+SCHEMAS_GERENCIADOS = {"canonical", "events", "infra", "analytics"}
 
 
 def include_object(object, name, type_, reflected, compare_to):
