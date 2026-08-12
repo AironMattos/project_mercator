@@ -15,6 +15,9 @@ from infrastructure.database.orm import pipeline_run  # noqa: F401
 from infrastructure.database.orm import entidade  # noqa: F401
 from infrastructure.database.orm import observacao_entidade  # noqa: F401
 from infrastructure.database.orm import fato_evento_territorial  # noqa: F401
+from infrastructure.database.orm import dim_cnae  # noqa: F401
+from infrastructure.database.orm import dim_categoria  # noqa: F401
+from infrastructure.database.orm import cnae_categoria_map  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
