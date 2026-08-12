@@ -11,10 +11,15 @@ from __future__ import annotations
 import logging
 import sys
 from collections import Counter
+from dataclasses import replace
 from datetime import date, datetime, timezone
 
+from commerce.cnae import normalizar_codigo_cnae
 from domain.event import Evento, detectar_desaparecimento, detectar_eventos_par
 from infrastructure.database.orm.pipeline_run import PipelineRun
+from infrastructure.database.repositories.categoria_repository import (
+    categoria_id_por_codigo_cnae,
+)
 from infrastructure.database.repositories.evento_repository import insert_eventos
 from infrastructure.database.repositories.observacao_repository import (
     iter_grupos_por_entidade,
@@ -34,15 +39,42 @@ def _gravar_lote(lote: list[Evento]) -> int:
         return insert_eventos(session, lote)
 
 
+def _categoria_id(atributos: dict, categoria_por_codigo: dict[str, str]) -> str | None:
+    codigo = normalizar_codigo_cnae(atributos.get("cnae_principal"))
+    if codigo is None:
+        return None
+    return categoria_por_codigo.get(codigo)
+
+
+def _com_categoria(eventos: list[Evento], categoria_id: str | None) -> list[Evento]:
+    """Enriquece o payload dos eventos com a categoria comercial resolvida.
+
+    A resolução (CNAE -> categoria) é responsabilidade de commerce/, não do
+    domínio puro de eventos - por isso acontece aqui na orquestração, não
+    dentro de domain/event/regras.py.
+    """
+    if categoria_id is None:
+        return eventos
+    return [replace(e, payload={**e.payload, "categoria_id": categoria_id}) for e in eventos]
+
+
 def _detectar_eventos_da_entidade(
-    observacoes: list, data_anterior: date, data_atual: date
+    observacoes: list,
+    data_anterior: date,
+    data_atual: date,
+    categoria_por_codigo: dict[str, str],
 ) -> list[Evento]:
     obs_anterior = next((o for o in observacoes if o.observado_em == data_anterior), None)
     obs_atual = next((o for o in observacoes if o.observado_em == data_atual), None)
 
     if obs_atual is not None:
-        return detectar_eventos_par(obs_anterior, obs_atual, ENTITY_TYPE)
-    return [detectar_desaparecimento(obs_anterior, ENTITY_TYPE, data_atual)]
+        eventos = detectar_eventos_par(obs_anterior, obs_atual, ENTITY_TYPE)
+        categoria_id = _categoria_id(obs_atual.atributos, categoria_por_codigo)
+    else:
+        eventos = [detectar_desaparecimento(obs_anterior, ENTITY_TYPE, data_atual)]
+        categoria_id = _categoria_id(obs_anterior.atributos, categoria_por_codigo)
+
+    return _com_categoria(eventos, categoria_id)
 
 
 def main() -> None:
@@ -63,12 +95,18 @@ def main() -> None:
 
     try:
         with get_session() as session:
+            categoria_por_codigo = categoria_id_por_codigo_cnae(session)
+        logger.info(
+            "%d mapeamentos cnae->categoria carregados", len(categoria_por_codigo)
+        )
+
+        with get_session() as session:
             for _entidade_id, observacoes in iter_grupos_por_entidade(
                 session, FONTE_ID, data_anterior, data_atual
             ):
                 total_entidades += 1
                 eventos = _detectar_eventos_da_entidade(
-                    observacoes, data_anterior, data_atual
+                    observacoes, data_anterior, data_atual, categoria_por_codigo
                 )
                 for evento in eventos:
                     contagem[evento.event_type] += 1
