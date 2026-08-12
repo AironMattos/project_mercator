@@ -70,6 +70,14 @@ function textoCobertura(cobertura: CoberturaTemporal): string {
 export function Dashboard() {
   const [base, setBase] = useState<EstadoBase>({ status: "carregando" });
   const [metricas, setMetricas] = useState<EstadoMetricas>({ status: "carregando" });
+  // Última resposta de /metricas/comercio que teve sucesso, separada do
+  // status de carregando/erro acima - o mapa e a legenda lêem daqui, não de
+  // `metricas`, para não zerar todo bairro pro cinza neutro a cada troca de
+  // filtro só porque a resposta nova ainda não chegou (era exatamente isso
+  // que dava a impressão de "mapa perde os indicadores" reportada pelo
+  // dono - ContagemEventos real ficava momentaneamente substituída por um
+  // array vazio até o fetch da nova categoria/período resolver).
+  const [metricasAtuais, setMetricasAtuais] = useState<MetricaComercio[]>([]);
   const [categoriaId, setCategoriaId] = useState<string>(TODAS_CATEGORIAS);
   const [presetPeriodo, setPresetPeriodo] = useState<string>("12");
   const [intervaloCustom, setIntervaloCustom] = useState<DateRange | undefined>(undefined);
@@ -117,7 +125,10 @@ export function Dashboard() {
     setMetricas({ status: "carregando" });
     getMetricasComercio({ categoriaId: categoriaFiltro, dataInicio, dataFim })
       .then((linhas) => {
-        if (!cancelado) setMetricas({ status: "pronto", metricas: linhas });
+        if (!cancelado) {
+          setMetricas({ status: "pronto", metricas: linhas });
+          setMetricasAtuais(linhas);
+        }
       })
       .catch((erro: unknown) => {
         if (!cancelado) {
@@ -268,14 +279,8 @@ export function Dashboard() {
               <>
                 <div className="flex items-center gap-3">
                   <SaldoLegend
-                    minSaldo={Math.min(
-                      0,
-                      ...(metricas.status === "pronto" ? metricas.metricas.map((m) => m.saldo) : [0]),
-                    )}
-                    maxSaldo={Math.max(
-                      0,
-                      ...(metricas.status === "pronto" ? metricas.metricas.map((m) => m.saldo) : [0]),
-                    )}
+                    minSaldo={Math.min(0, ...metricasAtuais.map((m) => m.saldo))}
+                    maxSaldo={Math.max(0, ...metricasAtuais.map((m) => m.saldo))}
                   />
                   {metricas.status === "carregando" && (
                     <span className="text-xs text-muted-foreground">atualizando…</span>
@@ -284,7 +289,7 @@ export function Dashboard() {
                 <div className="min-h-[520px] flex-1 overflow-hidden rounded-md border">
                   <ChoroplethMap
                     territorios={base.territorios}
-                    metricas={metricas.status === "pronto" ? metricas.metricas : []}
+                    metricas={metricasAtuais}
                     onSelecionarTerritorio={selecionarTerritorio}
                   />
                 </div>
