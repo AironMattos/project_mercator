@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mercator"
+version = "0.1.0"
+description = "Project Mercator - plataforma de eventos territoriais para Curitiba"
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    "sqlalchemy>=2.0",
+    "geoalchemy2>=0.20",
+    "psycopg2-binary>=2.9",
+    "alembic>=1.19",
+    "shapely>=2.1",
+    "pyproj>=3.7",
+    "requests>=2.34",
+    "python-dotenv>=1.0",
+    "fastapi>=0.141",
+    "uvicorn>=0.52",
+    "pandas>=2.0",
+    "geopandas>=1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["domain*", "commerce*", "pipelines*", "analytics*", "infrastructure*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
