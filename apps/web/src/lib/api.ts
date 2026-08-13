@@ -269,6 +269,99 @@ export function getBairroResumo(
   }));
 }
 
+export type EstabelecimentoRaio = {
+  entidadeId: string;
+  nome: string | null;
+  endereco: string | null;
+  categoriaId: string | null;
+  territorioId: string | null;
+  distanciaM: number;
+  confianca: "alta" | "media" | "baixa";
+  ponto: { lat: number; lon: number };
+};
+
+export type BuscaRaio = {
+  enderecoBuscado: string;
+  pontoBusca: { lat: number; lon: number };
+  raioM: number;
+  categoriaId: string | null;
+  total: number;
+  estabelecimentos: EstabelecimentoRaio[];
+  // Visível, não escondido: quantos estavam no raio mas com confianca='baixa'
+  // (não entram na contagem principal) - checkpoint 9, seção 5/6.
+  excluidosBaixaConfianca: number;
+};
+
+// Erro tipado pra distinguir "endereço não encontrado" (404) de "endereço
+// ambíguo" (422) de qualquer outra falha - o painel de busca por raio
+// precisa de uma mensagem diferente pra cada um (seção 6 do checkpoint 9),
+// não um "algo deu errado" genérico.
+export class BuscaRaioError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+type BuscaRaioApi = {
+  endereco_buscado: string;
+  ponto_busca: { lat: number; lon: number };
+  raio_m: number;
+  categoria_id: string | null;
+  total: number;
+  estabelecimentos: Array<{
+    entidade_id: string;
+    nome: string | null;
+    endereco: string | null;
+    categoria_id: string | null;
+    territorio_id: string | null;
+    distancia_m: number;
+    confianca: "alta" | "media" | "baixa";
+    ponto: { lat: number; lon: number };
+  }>;
+  excluidos_baixa_confianca: number;
+};
+
+export async function getBuscaRaio(
+  endereco: string,
+  raioM: number,
+  categoriaId?: string,
+): Promise<BuscaRaio> {
+  const url = new URL("/busca-raio", API_URL);
+  url.searchParams.set("endereco", endereco);
+  url.searchParams.set("raio_m", String(raioM));
+  if (categoriaId) url.searchParams.set("categoria_id", categoriaId);
+
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    const corpo = await res.json().catch(() => null);
+    const mensagem =
+      (corpo as { detail?: string } | null)?.detail ?? `Falha ao buscar (HTTP ${res.status})`;
+    throw new BuscaRaioError(res.status, mensagem);
+  }
+
+  const d = (await res.json()) as BuscaRaioApi;
+  return {
+    enderecoBuscado: d.endereco_buscado,
+    pontoBusca: d.ponto_busca,
+    raioM: d.raio_m,
+    categoriaId: d.categoria_id,
+    total: d.total,
+    estabelecimentos: d.estabelecimentos.map((e) => ({
+      entidadeId: e.entidade_id,
+      nome: e.nome,
+      endereco: e.endereco,
+      categoriaId: e.categoria_id,
+      territorioId: e.territorio_id,
+      distanciaM: e.distancia_m,
+      confianca: e.confianca,
+      ponto: e.ponto,
+    })),
+    excluidosBaixaConfianca: d.excluidos_baixa_confianca,
+  };
+}
+
 // Primeiro/último mês com evento real processado - não confundir com o
 // range do preset de período selecionado no filtro (ver achado da
 // auditoria de 2026-08-12: "últimos 12 meses" no filtro parecia sugerir 12

@@ -20,6 +20,7 @@ from infrastructure.database.orm import dim_categoria  # noqa: F401
 from infrastructure.database.orm import cnae_categoria_map  # noqa: F401
 from infrastructure.database.orm import contagem_eventos  # noqa: F401
 from infrastructure.database.orm import contagem_inicio_atividade  # noqa: F401
+from infrastructure.database.orm import geolocalizacao_entidade  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -12,6 +12,8 @@
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@maplibre/maplibre-gl-style-spec": "^26.2.1",
+    "@turf/circle": "^7.4.0",
+    "@turf/helpers": "^7.4.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

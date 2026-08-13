@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import date
 from typing import Any
 
@@ -94,3 +95,32 @@ class GeoJsonFeature(BaseModel):
 class GeoJsonFeatureCollection(BaseModel):
     type: str = "FeatureCollection"
     features: list[GeoJsonFeature]
+
+
+class PontoOut(BaseModel):
+    lat: float
+    lon: float
+
+
+class EstabelecimentoRaioOut(BaseModel):
+    entidade_id: uuid.UUID
+    nome: str | None
+    endereco: str | None
+    categoria_id: str | None
+    territorio_id: str | None
+    distancia_m: float
+    confianca: str
+    ponto: PontoOut
+
+
+class BuscaRaioOut(BaseModel):
+    endereco_buscado: str
+    ponto_busca: PontoOut
+    raio_m: int
+    categoria_id: str | None
+    total: int
+    estabelecimentos: list[EstabelecimentoRaioOut]
+    # Visível, não escondido: quantos estabelecimentos estavam no raio mas
+    # com confianca='baixa' (não entram na contagem principal) - checkpoint
+    # 9, seção 5.
+    excluidos_baixa_confianca: int

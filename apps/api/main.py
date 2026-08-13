@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import bairros, categorias, metricas, ranking, territorios
+from routers import bairros, busca_raio, categorias, metricas, ranking, territorios
 
 load_dotenv()
 
@@ -40,6 +40,7 @@ app.include_router(categorias.router)
 app.include_router(metricas.router)
 app.include_router(ranking.router)
 app.include_router(bairros.router)
+app.include_router(busca_raio.router)
 
 
 @app.get("/health")

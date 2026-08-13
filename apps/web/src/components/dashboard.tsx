@@ -9,6 +9,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { ChoroplethMap } from "@/components/choropleth-map";
 import { DetailPanel } from "@/components/detail-panel";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { RadiusSearchPanel } from "@/components/radius-search-panel";
 import { RankingList } from "@/components/ranking-list";
 import { SaldoLegend } from "@/components/saldo-legend";
 import {
@@ -32,7 +33,7 @@ import {
 } from "@/lib/api";
 import { formatarMesAno, intervaloUltimosMeses, PRESETS_PERIODO } from "@/lib/periodo";
 
-type Aba = "mapa" | "ranking";
+type Aba = "mapa" | "ranking" | "busca-raio";
 
 const TODAS_CATEGORIAS = "todas";
 const PERIODO_CUSTOM = "custom";
@@ -183,6 +184,7 @@ export function Dashboard() {
           <TabsList>
             <TabsTrigger value="mapa">Mapa</TabsTrigger>
             <TabsTrigger value="ranking">Ranking de crescimento</TabsTrigger>
+            <TabsTrigger value="busca-raio">Busca por raio</TabsTrigger>
           </TabsList>
         </Tabs>
       </header>
@@ -331,6 +333,14 @@ export function Dashboard() {
           <RankingList
             categoriaId={categoriaFiltro}
             onSelecionarTerritorio={selecionarTerritorioComNome}
+          />
+        )}
+
+        {base.status === "pronto" && aba === "busca-raio" && (
+          <RadiusSearchPanel
+            categoriaId={categoriaFiltro}
+            nomeCategoria={base.categorias.find((c) => c.categoria_id === categoriaFiltro)?.nome}
+            categorias={base.categorias}
           />
         )}
       </main>

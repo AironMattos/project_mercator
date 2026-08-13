@@ -2,7 +2,6 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import type { StyleSpecification } from "@maplibre/maplibre-gl-style-spec";
 import {
   LngLatBounds,
   Map as MaplibreMap,
@@ -15,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { GeoJsonFeatureCollection, MetricaComercio } from "@/lib/api";
+import { COR_SUPERFICIE, LARGURA_ANEL_SUPERFICIE, MAP_STYLE_URL } from "@/lib/map-style";
 import { expressaoCorPorSaldo, NEUTRO_SALDO_ZERO } from "@/lib/palette";
 
 // MapLibre localiza seu worker via `import.meta.url` do próprio chunk - sob o
@@ -31,21 +31,6 @@ type ChoroplethMapProps = {
   onSelecionarTerritorio?: (territorioId: string) => void;
 };
 
-// Estilo em branco, sem nenhuma fonte externa - o coroplético não depende
-// de basemap com ruas/rótulos, e depender de um tile server de terceiros
-// (ex.: demotiles.maplibre.org) provou ser frágil atrás de proxy/firewall:
-// falha calada (sem "load", sem polígono nenhum) quando a rede bloqueia.
-const ESTILO_BASE: StyleSpecification = {
-  version: 8,
-  sources: {},
-  layers: [
-    {
-      id: "background",
-      type: "background",
-      paint: { "background-color": "#f9f9f7" },
-    },
-  ],
-};
 const CENTRO_CURITIBA: [number, number] = [-49.2731, -25.4284];
 const FONTE_ID = "territorios";
 const CAMADA_PREENCHIMENTO = "territorios-fill";
@@ -113,7 +98,7 @@ export function ChoroplethMap({
 
     const map = new MaplibreMap({
       container: containerRef.current,
-      style: ESTILO_BASE,
+      style: MAP_STYLE_URL,
       center: CENTRO_CURITIBA,
       zoom: 10.5,
     });
@@ -153,9 +138,13 @@ export function ChoroplethMap({
         type: "line",
         source: FONTE_ID,
         paint: {
-          "line-color": "#ffffff",
-          "line-width": 0.6,
-          "line-opacity": 0.6,
+          // Anel de 2px na cor de superfície (checkpoint 9f) - separa o
+          // preenchimento colorido tanto dos bairros vizinhos quanto do
+          // mapa-base real (ruas/rótulos) por baixo, sem desenhar uma
+          // borda escura própria.
+          "line-color": COR_SUPERFICIE,
+          "line-width": LARGURA_ANEL_SUPERFICIE,
+          "line-opacity": 1,
         },
       });
 

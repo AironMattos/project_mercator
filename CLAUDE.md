@@ -660,6 +660,187 @@ vs. baseline 307, "acelerando"); bairros pequenos como Ganchinho aparecem bem po
 crescimento relativo mesmo com volume baixo (5 aberturas) - o comportamento que o ranking por
 volume absoluto nunca mostraria. 122 testes passando, `npm run build`/`lint`/`tsc` limpos.
 
+### Dois pilotos de geocodificação (2026-08-12, antes do checkpoint 9)
+
+A arquitetura original não tinha geolocalização em nível de ponto - não-objetivo deliberado,
+desnecessário pro Radar de Comércio em nível de bairro. Dois pilotos isolados (schema
+`experimental.*`, nunca tocando `canonical.*`) mediram se valia reabrir esse não-objetivo,
+usando os 1.655 endereços do bairro Lindóia (não Centro, por suspeita não confirmada de
+fallback de bairro contaminando o volume de lá):
+
+- **Piloto 1 (Nominatim público)**: 86,9% sucesso, 9,2% ambíguo, 3,8% falha. Amostra manual
+  (todos os 1.439 sucessos, não só 15-20): 99,2% caem dentro do polígono do bairro esperado.
+  Tempo medido: 1,36s/endereço (1s de rate limit + latência real) → extrapolado pra base
+  inteira (515.118 entidades): **~8,1 dias corridos** - inviável como operação única contra o
+  serviço público.
+- **Piloto 2 (geocodebr/CNEFE-IBGE, offline via subprocesso R)**: resolve **100%** dos 1.655
+  endereços (incluindo os 216 que o Nominatim não resolveu bem), em **2,75s** - ~700x mais
+  rápido. Mas só 91,7% caem dentro do polígono esperado (vs. 99,2% do Nominatim), com 2 erros
+  grosseiros de vários km (CEP do registro de origem não batendo com o bairro declarado -
+  achado de qualidade de dado, não bug do pacote). Bug real encontrado: `resultado_completo=TRUE`
+  quebra no geocodebr 0.6.4 (erro de binder do duckdb, "coluna empate não existe") independente
+  de `resolver_empates` - por isso a coluna nativa de ambiguidade (`empate`) não pôde ser usada;
+  status ambíguo é aproximado pelo prefixo de `tipo_resultado` (d=determinístico/p=probabilístico).
+  Setup: CNEFE ~1,46GB, baixado em 21s (custo único).
+- **Comparação cruzada**: nenhum caso onde os dois falham (união cobre 100% da amostra); nos 66
+  casos de forte divergência (>500m) entre os dois serviços, Nominatim caiu dentro do polígono
+  esperado 38x contra 3x do geocodebr - sinal de que Nominatim é mais confiável quando os dois
+  discordam.
+
+**Conclusão que motivou o checkpoint 9**: nenhum serviço sozinho é confiável e viável ao mesmo
+tempo - geocodebr cobre rápido (mas erra mais), Nominatim corrige onde geocodebr é fraco (mas é
+lento demais pra rodar sozinho na base inteira). Tabelas dos pilotos (`experimental.geocodificacao_piloto`,
+`experimental.geocodificacao_piloto_geocodebr`) mantidas como registro histórico da decisão, não
+apagadas.
+
+### Checkpoint 9a-9e — Geolocalização de entidade e busca por raio: **concluído (9a-9b-9d-9e); 9c parcial por decisão pendente**
+
+Implementa a combinação geocodebr+Nominatim dos dois pilotos como pipeline de produção -
+reabre deliberadamente o não-objetivo original de geolocalização em nível de ponto.
+
+**9a - modelo e regra de reconciliação**: `canonical.geolocalizacao_entidade` - uma linha por
+`entidade_id` (não por observação), `GEOGRAPHY(Point,4326)` + índice GIST (criado
+automaticamente pelo `geoalchemy2` logo após o `CREATE TABLE` - um `op.create_index` explícito
+na migração colide com isso, `DuplicateTable`; mesmo padrão de `dim_territorio.geometria`,
+sem índice explícito na migração dele também). `src/domain/location/` (regra pura, sem I/O):
+- `avaliar_geocodebr(precisao)`: só `precisao == "numero"` (nível de número exato) dispensa a
+  segunda passagem → `alta`. Qualquer outra coisa (`numero_aproximado`, `logradouro`, `cep`,
+  `localidade`, `municipio`, ou `None`) → `baixa` provisória, enfileirada. Limiar mais
+  conservador que uma leitura literal do prompt teria sugerido: o Piloto 2 mostrou que
+  `numero_aproximado` também contribui pra pontos fora do bairro esperado, não só
+  logradouro/CEP - registrado aqui por ser a interpretação de "nível de número exato" adotada,
+  ajustável se a distribuição real pedir.
+- `reconciliar(ponto_geocodebr, ponto_nominatim)`: concordância ≤150m → `alta` (usa ponto do
+  Nominatim); 150m-1km → `media`; >1km → `baixa`, mas com ponto (não `None`) - limiares
+  calibrados pelo padrão observado no Piloto 2 (mediana de 13m quando concordam; Nominatim
+  ganha 38-3 nos casos de forte divergência). Dois ramos extras, não explícitos no prompt de
+  referência, necessários porque a fila real mistura "geocodebr impreciso" com "geocodebr não
+  achou nada": geocodebr sem nada + Nominatim resolve → `media` (só uma fonte, sem segunda
+  opinião pra confirmar, não vira `alta`); geocodebr impreciso + Nominatim não resolve nem
+  contesta → mantém `baixa` com o ponto do geocodebr (não regride pra `None`). 18 testes
+  automatizados cobrindo os quatro ramos do prompt de referência (o quarto, "os dois
+  resolvem", com um teste por limiar de distância) mais os dois ramos extras e os limiares de
+  fronteira.
+
+**9b - pipeline em lote, Etapa 1 (geocodebr)**: `src/pipelines/geocoding/etapa1_geocodebr.py` +
+`geocode_batch.R` (chamado via subprocesso, `resultado_completo=FALSE`/`resolver_empates=FALSE`
+- mesma configuração que contorna o bug do Piloto 2). Retomável: lotes de 5000, commitados antes
+do próximo começar; a query de origem (`entidades_comercio_pendentes`, `NOT EXISTS` em
+`geolocalizacao_entidade`) já exclui quem tem linha, então rodar de novo só pega o resto - sem
+parâmetro extra. **Falha real encontrada rodando contra a base inteira**: o subprocesso R
+crashou uma vez depois de ~44 lotes bem-sucedidos ("could not start R, exited with non-zero
+status, has crashed or was killed"), sem sinal de exaustão de disco/memória - corrigido com
+3 tentativas por lote e um intervalo curto entre elas; o pipeline retomou de onde parou (215.020
+já gravadas) sem perder trabalho. **Rodado contra a base inteira**: 515.118 entidades - **73,2%
+(376.926) `alta`** direto (número exato, sem segunda passagem), **26,8% (138.192) `baixa`**
+provisória na fila.
+
+**9c - pipeline em lote, Etapa 2 (Nominatim, resíduo)**: `src/pipelines/geocoding/etapa2_nominatim.py`.
+Antes de rodar, estima o tempo a 1 req/s (1,36s/req observado, ver Piloto 1) e para pra reportar
+se ultrapassar o limiar configurado (`LIMIAR_HORAS_PARA_PARAR = 7.0`). **Rodado contra a fila
+real**: 138.192 entidades pendentes → estimativa de **52,2h** - muito acima do limiar. O
+pipeline parou e reportou, exatamente como desenhado, recomendando avaliar uma instância própria
+de Nominatim (só Brasil) em vez de rodar dias contra o serviço público. **Decisão de infra
+pendente, não resolvida nesta sessão** - rodar o resíduo (`--forcar`), hospedar Nominatim
+próprio, ou aceitar cobertura parcial (73,2% `alta` já é a maioria da base) é escolha do dono do
+projeto. Enquanto isso não for decidido, a distribuição de confiança da base fica travada em
+alta/baixa (sem nenhuma `media` ainda - essa categoria só existe depois da segunda passagem).
+
+**9d - endpoint de busca por raio**: `GET /busca-raio` (`endereco`, `raio_m`, `categoria_id?`).
+Geocodifica `endereco` com Nominatim direto (uma chamada ocasional, não geocodebr - subprocesso R
+por requisição teria latência alta demais pra uso interativo); 404 se não encontrar, 422 se
+ambíguo (nunca adivinha qual candidato usar). `geolocalizacao_repository.buscar_no_raio` usa
+`ST_DWithin` contra `geolocalizacao_entidade`, unido com a observação mais recente de cada
+entidade (nunca conta a mesma entidade duas vezes por causa de histórico). Não filtra por sinal
+de fechamento/`DESAPARECIMENTO` (está sob revisão separada, de propósito). Resposta separa
+`estabelecimentos` (confianca `alta`/`media`) de `excluidos_baixa_confianca` (contagem, visível,
+não escondida) - o filtro de categoria se aplica aos dois igualmente, pra não mostrar "+N pouco
+confiáveis" de uma categoria diferente da buscada. **Testado com endereços reais** contra a base
+inteira geocodificada: `AV. PRESIDENTE WENCESLAU BRAZ, 1893` em 1km → 3.767 estabelecimentos;
+filtrado por `bares_restaurantes` em 300m → 4 principais + 3 excluídos por baixa confiança,
+nomes/categorias/distâncias corretos. 7 testes automatizados novos (`tests/api/test_busca_raio.py`,
+Nominatim mockado).
+
+**9e - tela de busca por raio**: nova aba "Busca por raio" (reaproveita o combobox de categoria
+já existente no cabeçalho). Campo de endereço + chips de raio (250m/500m/1km/2km) +
+`RadiusMap` (círculo via `@turf/circle`, marcadores azul-destaque - cor categórica existente,
+não uma nova) + stat tile simples (sem baseline/tendência, de propósito - é medida pontual no
+espaço). Aviso de `excluidos_baixa_confianca` discreto, separado da contagem principal, só
+quando >0. Estados carregando/erro (404/422 com mensagens distintas)/vazio tratados
+explicitamente. **Testado ponta a ponta no navegador contra a API/banco reais**: busca com
+resultado (805 estabelecimentos em 500m, mapa com círculo+marcadores renderizando), filtro de
+categoria (15→4 conforme o filtro), raio pequeno (250m, 4 resultados), endereço não encontrado
+(404, alerta correto), endereço ambíguo (422, alerta correto), e resultado vazio (0
+estabelecimentos de uma categoria rara num raio pequeno, alerta correto). **Achado à parte, não
+corrigido por estar fora do escopo deste checkpoint**: o combobox de categoria (já existente
+desde o checkpoint 7c, não tocado aqui) mostra o `categoria_id` bruto (ex.: `bares_restaurantes`)
+em vez do nome legível no texto do trigger, tanto na aba Mapa quanto na de busca por raio -
+bug pré-existente, confirmado reproduzindo na aba Mapa sem nenhuma mudança deste checkpoint.
+
+**Rodado contra o banco/API/frontend reais**: 156 testes passando (122 do checkpoint 8 + 34
+novos: 18 de `domain/location`, 9 de infra de geocodificação, 7 de `/busca-raio`).
+`npm run build`/`lint`/`tsc` limpos.
+
+### Checkpoint 9f-9g — Mapa-base real e lista de resultados na busca por raio: **concluído**
+
+**9f - mapa-base real**: `apps/web/src/lib/map-style.ts` centraliza a URL do style, usada tanto
+por `choropleth-map.tsx` (mapa principal) quanto por `radius-map.tsx` (busca por raio) - nunca
+duplicada. Provedor usado: **OpenFreeMap** (`https://tiles.openfreemap.org/styles/positron`),
+não MapTiler (a recomendação original do prompt de referência) - criar conta/API key não é algo
+que a Claude possa fazer sozinha (ação proibida por política, mesma categoria de "criar contas"
+documentada nas regras de segurança da sessão). OpenFreeMap foi escolhido por não precisar de
+conta/chave e ser explicitamente declarado apropriado pra produção contínua (ao contrário dos
+tiles brutos do OSM, que têm a mesma restrição de uso pesado já vista com o Nominatim) -
+confirmado consultando a documentação do serviço antes de adotar, não presumido. Estilo
+"positron": claro/neutro, POIs removidos por design, pra não competir com o coroplético/
+marcadores. Troca de provedor (ex.: pra MapTiler depois) documentada como comentário no próprio
+`map-style.ts` - um único lugar pra mudar. Anel de 2px na cor de superfície (`#ffffff`, o
+mesmo `--background` do produto) aplicado tanto na borda dos polígonos do coroplético quanto no
+contorno dos marcadores da busca por raio - contra ruas/rótulos reais agora visíveis por baixo,
+o espaçamento (não uma borda escura) é o que mantém o dado legível. Verificado visualmente nas
+duas telas: ruas e nomes de bairro/cidade aparecem, coroplético e marcadores continuam sendo o
+elemento mais chamativo.
+
+**9g - lista de resultados**: `GET /busca-raio` ganhou o campo `endereco` (composto via
+`concat_ws` no SQL - pula partes ausentes sem deixar separador solto, ex. sem número informado
+não vira "R. X, "). `nome` já priorizava `NOME_FANTASIA` sobre `NOME_EMPRESARIAL` desde o
+checkpoint 9d (`COALESCE` no SQL) - não precisou mudar. Não tocou a lógica de filtragem por
+confiança nem `canonical.geolocalizacao_entidade`, como pedido. `radius-results-list.tsx`:
+lista lateral (`lg:flex-row`) ou abaixo (empilhado em telas estreitas) do mapa, ordenada por
+distância (a mesma ordem que a API já devolve), nome + categoria (resolvida no frontend a
+partir da lista de categorias já carregada pelo Dashboard, sem endpoint novo) + endereço +
+distância no mesmo formato do popup do mapa (`"334m"`). Paginada em lotes de 50 com "carregar
+mais" - resultado grande (2km, sem filtro de categoria) chega a *milhares* de estabelecimentos
+e a lista nunca renderiza mais que 50 linhas de uma vez, verificado (`50` botões no DOM antes de
+clicar "carregar mais"). Sincronização hover/clique bidirecional entre lista e mapa: hover numa
+linha ou num marcador atualiza o mesmo estado `hoveredId` no componente pai
+(`radius-search-panel.tsx`), que os dois lados leem - `radius-map.tsx` usa uma expressão de
+estilo (`case` no `circle-radius`/`circle-stroke-width`) pra destacar o marcador correspondente,
+em vez de `feature-state` (mais simples de manter sincronizada com um id vindo de fora do mapa).
+Clicar numa linha centraliza o mapa (`flyTo`) no estabelecimento - um contador (`selectedNonce`)
+força o `flyTo` mesmo se a mesma linha for clicada duas vezes seguidas. **Verificação da
+sincronização**: confirmada via inspeção direta do fiber do React (não só visual - marcadores de
+~6-10px são pequenos demais pra confirmar destaque com confiança só por screenshot) - o handler
+`onMouseEnter` da lista dispara, o estado `hoveredId` propaga e a classe de destaque (`bg-muted`)
+é aplicada na linha certa; o mesmo estado é a prop que `radius-map.tsx` consome, então o
+destaque no mapa segue a mesma atualização.
+
+**Achado reportado, não resolvido** (conforme pedido - "não implemente clustering... se ainda
+estiver poluído, reporte como achado, não resolva sem perguntar"): com raio de 2km e "todas as
+categorias" (ex.: 16.759 estabelecimentos num teste real), o mapa fica visualmente poluído - um
+tapete denso de marcadores sobrepostos, mesmo com o mapa-base real e o anel de 2px ajudando a
+distinguir cada ponto individualmente. O mapa-base novo por si só não resolve isso pra raios
+grandes sem filtro de categoria; a lista lateral (nova, deste checkpoint) já dá uma forma
+utilizável de explorar esse volume sem depender só do mapa, mas clustering de marcador (ou outra
+técnica de agregação visual) é uma melhoria pendente, fora do escopo deste checkpoint - decisão
+de quando/como resolver fica com o dono do projeto.
+
+**Rodado contra o banco/API/frontend reais**: 157 testes passando (156 do checkpoint 9a-9e + 1
+novo, `test_busca_raio_estabelecimento_inclui_endereco_de_exibicao`). `npm run build`/`lint`
+limpos. Testado no navegador contra a API/banco reais: mapa principal e busca por raio com ruas/
+nomes visíveis e coroplético/marcadores legíveis; busca por raio em 500m e 2km, lista ordenada
+por distância, paginação em 50 confirmada com 805 e 16.759 resultados.
+
 ## Notas operacionais
 
 - Ambiente Python único disponível na máquina é 3.14 (via `py -0p`); todas as dependências

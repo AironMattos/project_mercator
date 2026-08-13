@@ -1,29 +1,31 @@
 from __future__ import annotations
 
 import os
+import uuid
 from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
 from geoalchemy2.shape import from_shape
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import MultiPolygon, Point, Polygon
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from infrastructure.database.orm.base import Base
+from infrastructure.database.orm.cnae_categoria_map import CnaeCategoriaMap
 from infrastructure.database.orm.contagem_eventos import ContagemEventos
 from infrastructure.database.orm.contagem_inicio_atividade import ContagemInicioAtividade
 from infrastructure.database.orm.dim_categoria import DimCategoria
+from infrastructure.database.orm.dim_cnae import DimCnae
+from infrastructure.database.orm.entidade import Entidade
+from infrastructure.database.orm.geolocalizacao_entidade import GeolocalizacaoEntidade
+from infrastructure.database.orm.observacao_entidade import ObservacaoEntidade
 from infrastructure.database.orm.territorio import DimTerritorio
 
 # Modelos ORM importados aqui só para registrar em Base.metadata antes do
-# create_all - a API não usa evento/cnae/entidade/observação diretamente,
-# mas as tabelas precisam existir por causa das foreign keys.
-from infrastructure.database.orm import cnae_categoria_map  # noqa: F401
-from infrastructure.database.orm import dim_cnae  # noqa: F401
-from infrastructure.database.orm import entidade  # noqa: F401
+# create_all - a API não usa evento diretamente, mas a tabela precisa
+# existir por causa das foreign keys.
 from infrastructure.database.orm import fato_evento_territorial  # noqa: F401
-from infrastructure.database.orm import observacao_entidade  # noqa: F401
 from infrastructure.database.orm import pipeline_run  # noqa: F401
 
 ADMIN_DATABASE_URL = os.environ.get(
@@ -217,6 +219,138 @@ def seeded_session(test_engine):
             ),
             ContagemInicioAtividade(
                 territorio_id="curitiba-bairro-batel", categoria_id=None, mes=date(2026, 7, 1), contagem=1
+            ),
+        ]
+    )
+
+    # Checkpoint 9 (busca por raio) - cnae/categoria mínimos pra resolver
+    # categoria_id a partir do cnae_principal bruto da observação.
+    session.add(
+        DimCnae(codigo_cnae="5611203", descricao="Restaurantes e similares")
+    )
+    session.flush()
+    session.add(CnaeCategoriaMap(codigo_cnae="5611203", categoria_id="bares_restaurantes"))
+
+    # entidade/observacao/geolocalizacao - cenário conhecido pra
+    # GET /busca-raio: ponto de referência (-49.275, -25.435), dentro do
+    # bbox de "Centro" definido acima.
+    ref_lon, ref_lat = -49.275, -25.435
+    metros_por_grau_lat = 111_320.0
+
+    def _deslocado(metros: float) -> Point:
+        return Point(ref_lon, ref_lat + metros / metros_por_grau_lat)
+
+    entidade_perto_alta = uuid.uuid4()
+    entidade_media_sem_categoria = uuid.uuid4()
+    entidade_baixa = uuid.uuid4()
+    entidade_longe = uuid.uuid4()
+
+    session.add_all(
+        [
+            Entidade(entidade_id=entidade_perto_alta, tipo_entidade="comercio", identificador_fonte="ALVARA-BUSCA-1"),
+            Entidade(entidade_id=entidade_media_sem_categoria, tipo_entidade="comercio", identificador_fonte="ALVARA-BUSCA-2"),
+            Entidade(entidade_id=entidade_baixa, tipo_entidade="comercio", identificador_fonte="ALVARA-BUSCA-3"),
+            Entidade(entidade_id=entidade_longe, tipo_entidade="comercio", identificador_fonte="ALVARA-BUSCA-4"),
+        ]
+    )
+    session.flush()
+
+    observado_em = date(2026, 8, 1)
+    session.add_all(
+        [
+            ObservacaoEntidade(
+                entidade_id=entidade_perto_alta,
+                observado_em=observado_em,
+                atributos={
+                    "nome_fantasia": "Restaurante Perto",
+                    "nome_empresarial": "PERTO LTDA",
+                    "cnae_principal": "I.56.1.1-2/03-00",
+                    "territorio_id": "curitiba-bairro-centro",
+                    "endereco": "R. X",
+                    "numero": "10",
+                    "bairro": "CENTRO",
+                    "cep": "80000000",
+                },
+                fonte_id="alvaras_smf",
+                snapshot_ref="teste",
+            ),
+            ObservacaoEntidade(
+                entidade_id=entidade_media_sem_categoria,
+                observado_em=observado_em,
+                atributos={
+                    "nome_fantasia": None,
+                    "nome_empresarial": "MEDIA SEM CATEGORIA LTDA",
+                    "cnae_principal": None,
+                    "territorio_id": "curitiba-bairro-centro",
+                    "endereco": "R. Y",
+                    "numero": "20",
+                    "bairro": "CENTRO",
+                    "cep": "80000000",
+                },
+                fonte_id="alvaras_smf",
+                snapshot_ref="teste",
+            ),
+            ObservacaoEntidade(
+                entidade_id=entidade_baixa,
+                observado_em=observado_em,
+                atributos={
+                    "nome_fantasia": "Baixa Confianca",
+                    "nome_empresarial": "BAIXA LTDA",
+                    "cnae_principal": "I.56.1.1-2/03-00",
+                    "territorio_id": "curitiba-bairro-centro",
+                    "endereco": "R. Z",
+                    "numero": "30",
+                    "bairro": "CENTRO",
+                    "cep": "80000000",
+                },
+                fonte_id="alvaras_smf",
+                snapshot_ref="teste",
+            ),
+            ObservacaoEntidade(
+                entidade_id=entidade_longe,
+                observado_em=observado_em,
+                atributos={
+                    "nome_fantasia": "Muito Longe",
+                    "nome_empresarial": "LONGE LTDA",
+                    "cnae_principal": "I.56.1.1-2/03-00",
+                    "territorio_id": "curitiba-bairro-centro",
+                    "endereco": "R. W",
+                    "numero": "40",
+                    "bairro": "CENTRO",
+                    "cep": "80000000",
+                },
+                fonte_id="alvaras_smf",
+                snapshot_ref="teste",
+            ),
+        ]
+    )
+    session.add_all(
+        [
+            GeolocalizacaoEntidade(
+                entidade_id=entidade_perto_alta,
+                ponto=from_shape(_deslocado(50), srid=4326),
+                confianca="alta",
+                fonte_primaria="geocodebr",
+            ),
+            GeolocalizacaoEntidade(
+                entidade_id=entidade_media_sem_categoria,
+                ponto=from_shape(_deslocado(300), srid=4326),
+                confianca="media",
+                fonte_primaria="geocodebr",
+                fonte_secundaria="nominatim",
+            ),
+            GeolocalizacaoEntidade(
+                entidade_id=entidade_baixa,
+                ponto=from_shape(_deslocado(100), srid=4326),
+                confianca="baixa",
+                fonte_primaria="geocodebr",
+                fonte_secundaria="nominatim",
+            ),
+            GeolocalizacaoEntidade(
+                entidade_id=entidade_longe,
+                ponto=from_shape(_deslocado(5000), srid=4326),
+                confianca="alta",
+                fonte_primaria="geocodebr",
             ),
         ]
     )
