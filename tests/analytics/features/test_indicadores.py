@@ -13,6 +13,7 @@ from analytics.features import (
     calcular_baseline,
     calcular_ranking,
     calcular_tendencia,
+    detectar_saldo_negativo_consecutivo,
 )
 
 
@@ -320,3 +321,68 @@ def test_ranking_piso_e_configuravel():
 
     assert calcular_ranking(itens) == []
     assert [r.territorio_id for r in calcular_ranking(itens, baseline_minimo=5)] == ["baseline-8"]
+
+
+# --- calcular_ranking: ordem asc/desc (checkpoint 11b) -------------------
+
+
+def test_ranking_ordem_asc_traz_maiores_retracoes_primeiro():
+    itens = [
+        ItemComBaseline(territorio_id="crescendo", valor_atual=20.0, baseline=10.0, variacao_pct=1.0),
+        ItemComBaseline(territorio_id="caindo-muito", valor_atual=10.0, baseline=100.0, variacao_pct=-0.9),
+        ItemComBaseline(territorio_id="caindo-pouco", valor_atual=90.0, baseline=100.0, variacao_pct=-0.1),
+    ]
+
+    resultado = calcular_ranking(itens, ordem="asc")
+
+    assert [r.territorio_id for r in resultado] == ["caindo-muito", "caindo-pouco", "crescendo"]
+    assert resultado[0].posicao == 1
+
+
+def test_ranking_ordem_desc_e_o_padrao_e_nao_muda_com_a_mudanca():
+    itens = [
+        ItemComBaseline(territorio_id="a", valor_atual=20.0, baseline=10.0, variacao_pct=1.0),
+        ItemComBaseline(territorio_id="b", valor_atual=8.0, baseline=10.0, variacao_pct=-0.2),
+    ]
+
+    assert calcular_ranking(itens) == calcular_ranking(itens, ordem="desc")
+
+
+# --- detectar_saldo_negativo_consecutivo (checkpoint 11b) -----------------
+
+
+def test_sinal_saldo_negativo_consecutivo_detecta_quando_todos_meses_negativos():
+    mes_ref = date(2026, 8, 1)
+    serie = _serie_meses_seguidos(mes_ref, [-5.0, -3.0, -1.0, -2.0])
+
+    assert detectar_saldo_negativo_consecutivo(serie, mes_ref) is True
+
+
+def test_sinal_saldo_negativo_consecutivo_falso_se_um_mes_e_positivo():
+    mes_ref = date(2026, 8, 1)
+    serie = _serie_meses_seguidos(mes_ref, [-5.0, -3.0, 1.0, -2.0])
+
+    assert detectar_saldo_negativo_consecutivo(serie, mes_ref) is False
+
+
+def test_sinal_saldo_negativo_consecutivo_falso_se_mes_faltando_na_janela():
+    # série não é zero-preenchida - mês ausente não conta como "não
+    # negativo", invalida o sinal (mesma convenção de saldo em
+    # feature_repository: ausência = não processado, não zero).
+    mes_ref = date(2026, 8, 1)
+    serie = [
+        PontoMensal(mes=date(2026, 8, 1), valor=-5.0),
+        PontoMensal(mes=date(2026, 7, 1), valor=-3.0),
+        # 2026-06 ausente
+        PontoMensal(mes=date(2026, 5, 1), valor=-1.0),
+    ]
+
+    assert detectar_saldo_negativo_consecutivo(serie, mes_ref) is False
+
+
+def test_sinal_saldo_negativo_consecutivo_minimo_meses_configuravel():
+    mes_ref = date(2026, 8, 1)
+    serie = _serie_meses_seguidos(mes_ref, [-5.0, -3.0])
+
+    assert detectar_saldo_negativo_consecutivo(serie, mes_ref, minimo_meses=2) is True
+    assert detectar_saldo_negativo_consecutivo(serie, mes_ref, minimo_meses=4) is False

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import date
 
 from geoalchemy2 import Geography
 from geoalchemy2.shape import from_shape, to_shape
@@ -12,11 +13,19 @@ from sqlalchemy.orm import Session
 
 from domain.location import ResultadoGeolocalizacao
 from infrastructure.database.orm.entidade import Entidade
+from infrastructure.database.orm.fato_evento_territorial import FatoEventoTerritorial
 from infrastructure.database.orm.geolocalizacao_entidade import GeolocalizacaoEntidade
 from infrastructure.database.orm.observacao_entidade import ObservacaoEntidade
 from infrastructure.geocoding.geocodebr_subprocess import EnderecoParaGeocodificar
 
 FONTE_ID = "alvaras_smf"
+
+# Mesmo corte de confiança usado no censo de estabelecimentos (busca_raio.py,
+# CONFIANCAS_NA_CONTAGEM_PRINCIPAL) - confiança 'baixa' não entra em nenhuma
+# contagem espacial, eventos incluídos.
+CONFIANCAS_VALIDAS_PARA_EVENTO = ("alta", "media")
+
+TIPOS_EVENTO_COMERCIO = ("PRIMEIRA_OBSERVACAO", "ABERTURA_CONFIRMADA", "DESAPARECIMENTO")
 
 
 @dataclass(frozen=True)
@@ -192,6 +201,15 @@ def contar_por_confianca(session: Session) -> dict[str, int]:
     return {confianca: n for confianca, n in session.execute(stmt)}
 
 
+def contar_entidades_comercio(session: Session) -> int:
+    """Total de entidades tipo_entidade='comercio' - o denominador de
+    `pct_localizacao_valida` em GET /qualidade-dados (não necessariamente
+    igual à soma de contar_por_confianca: uma entidade pode ainda não ter
+    nenhuma linha em geolocalizacao_entidade)."""
+    stmt = select(func.count()).select_from(Entidade).where(Entidade.tipo_entidade == "comercio")
+    return session.execute(stmt).scalar_one()
+
+
 def casos_discordancia_grave(session: Session, limiar_m: float = 1000.0) -> list[tuple[uuid.UUID, float]]:
     """Entidades onde geocodebr e Nominatim discordaram gravemente
     (distância > limiar_m) - pra investigação de padrão comum, pedida no
@@ -200,6 +218,53 @@ def casos_discordancia_grave(session: Session, limiar_m: float = 1000.0) -> list
         GeolocalizacaoEntidade.entidade_id, GeolocalizacaoEntidade.distancia_desempate_m
     ).where(GeolocalizacaoEntidade.distancia_desempate_m > limiar_m)
     return [(row.entidade_id, float(row.distancia_desempate_m)) for row in session.execute(stmt)]
+
+
+@dataclass(frozen=True)
+class EventoNoRaio:
+    event_type: str
+    data_evento: date
+    categoria_id: str | None
+
+
+def eventos_no_raio(
+    session: Session, *, lat: float, lon: float, raio_m: int, categoria_id: str | None = None
+) -> list[EventoNoRaio]:
+    """Eventos de comércio (aberturas/desaparecimentos, ver
+    TIPOS_EVENTO_COMERCIO) cuja entidade está geolocalizada dentro do raio -
+    junta events.fato_evento_territorial com canonical.geolocalizacao_entidade
+    via entidade_id (checkpoint 11d, "Investigação por endereço" evoluída).
+    Mesmo corte de confiança do censo de estabelecimentos (buscar_no_raio) -
+    'baixa' não entra. `fato_evento_territorial` tem poucos milhares de
+    linhas hoje (ver CLAUDE.md) - filtrar em Python depois de trazer as
+    linhas (feito por quem chama, ver busca_raio.py) não tem custo de
+    performance relevante, ao contrário de uma busca sobre
+    observacao_entidade (~515 mil linhas).
+    """
+    ponto_busca = cast(func.ST_SetSRID(func.ST_MakePoint(lon, lat), 4326), Geography)
+    tabela = FatoEventoTerritorial
+    stmt = (
+        select(
+            tabela.event_type,
+            tabela.data_evento,
+            tabela.payload["categoria_id"].astext.label("categoria_id"),
+        )
+        .join(GeolocalizacaoEntidade, GeolocalizacaoEntidade.entidade_id == tabela.entidade_id)
+        .where(
+            tabela.entity_type == "comercio",
+            tabela.event_type.in_(TIPOS_EVENTO_COMERCIO),
+            GeolocalizacaoEntidade.confianca.in_(CONFIANCAS_VALIDAS_PARA_EVENTO),
+            GeolocalizacaoEntidade.ponto.isnot(None),
+            func.ST_DWithin(GeolocalizacaoEntidade.ponto, ponto_busca, raio_m),
+        )
+    )
+    if categoria_id is not None:
+        stmt = stmt.where(tabela.payload["categoria_id"].astext == categoria_id)
+
+    return [
+        EventoNoRaio(event_type=row.event_type, data_evento=row.data_evento, categoria_id=row.categoria_id)
+        for row in session.execute(stmt)
+    ]
 
 
 def buscar_no_raio(session: Session, lat: float, lon: float, raio_m: int) -> list[EstabelecimentoNoRaio]:

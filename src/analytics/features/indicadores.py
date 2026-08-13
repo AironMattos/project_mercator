@@ -169,25 +169,37 @@ def calcular_tendencia(
 
 
 def calcular_ranking(
-    itens: Sequence[ItemComBaseline], *, baseline_minimo: float = BASELINE_MINIMO_RANKING
+    itens: Sequence[ItemComBaseline],
+    *,
+    baseline_minimo: float = BASELINE_MINIMO_RANKING,
+    ordem: str = "desc",
 ) -> list[ItemRanking]:
-    """Ordena por variacao_pct desc - crescimento relativo, não volume
-    absoluto (um bairro pequeno acelerando aparece à frente de um grande
-    estável, de propósito). Itens sem variacao_pct (baseline indisponível)
-    não são elegíveis - não entram na lista nem contam pro `total`.
+    """Ordena por variacao_pct - crescimento relativo, não volume absoluto
+    (um bairro pequeno acelerando aparece à frente de um grande estável, de
+    propósito). Itens sem variacao_pct (baseline indisponível) não são
+    elegíveis - não entram na lista nem contam pro `total`.
+
+    `ordem="desc"` (padrão): maiores crescimentos primeiro. `ordem="asc"`:
+    maiores retrações primeiro (checkpoint 11b - "maiores crescimentos" e
+    "maiores retrações" são duas listas distintas no prompt de referência,
+    nunca misturadas numa única lista ordenada; a mesma função cobre as
+    duas, só invertendo o sinal da chave de ordenação - não uma segunda
+    implementação).
 
     Piso mínimo de volume (checkpoint 10d): itens com baseline abaixo de
     `baseline_minimo` também ficam de fora do ranking principal, mesmo
     tendo variacao_pct - variação percentual sobre um baseline de 2-5
-    aberturas é ruído estatístico, não sinal de crescimento real. Quem
-    chama esta função e precisa saber quantos ficaram de fora por esse
-    motivo (pra não escondê-los silenciosamente) deve comparar contra a
-    lista de entrada - ver montar_ranking_aberturas.
+    aberturas é ruído estatístico, não sinal de crescimento real. Aplica
+    nas duas direções (crescimento e retração) igualmente. Quem chama esta
+    função e precisa saber quantos ficaram de fora por esse motivo (pra não
+    escondê-los silenciosamente) deve comparar contra a lista de entrada -
+    ver montar_ranking_aberturas.
 
     Desempate por territorio_id (determinístico, não afeta o significado
     do ranking - só evita ordem instável entre execuções quando dois
     bairros empatam exatamente na variação).
     """
+    sinal = 1 if ordem == "asc" else -1
     elegiveis = sorted(
         (
             item
@@ -195,7 +207,7 @@ def calcular_ranking(
             if item.variacao_pct is not None
             and (item.baseline is None or item.baseline >= baseline_minimo)
         ),
-        key=lambda item: (-item.variacao_pct, item.territorio_id or ""),
+        key=lambda item: (sinal * item.variacao_pct, item.territorio_id or ""),
     )
     total = len(elegiveis)
     return [
@@ -210,3 +222,25 @@ def calcular_ranking(
         )
         for posicao, item in enumerate(elegiveis, start=1)
     ]
+
+
+def detectar_saldo_negativo_consecutivo(
+    serie: Sequence[PontoMensal], mes_referencia: date, *, minimo_meses: int = 4
+) -> bool:
+    """Sinal simples e documentado (não um score oculto) - seção "SINAIS E
+    DESTAQUES" do prompt de referência: True quando os `minimo_meses` meses
+    fechados terminando em `mes_referencia` têm todos saldo < 0. O critério
+    (4 meses consecutivos de saldo negativo) é o texto que acompanha o
+    sinal em tela, nunca escondido atrás de uma pontuação.
+
+    `serie` não é zero-preenchida (mesma convenção de saldo em
+    feature_repository - ausência de mês significa "não processamos essa
+    comparação de snapshot", não "saldo zero"), então um mês faltante
+    dentro da janela invalida o sinal em vez de contar como não-negativo.
+    """
+    mes_referencia = _normalizar_mes(mes_referencia)
+    meses_janela = [_meses_antes(mes_referencia, n) for n in range(minimo_meses)]
+    valores = {_normalizar_mes(p.mes): p.valor for p in serie}
+    if any(mes not in valores for mes in meses_janela):
+        return False
+    return all(valores[mes] < 0 for mes in meses_janela)

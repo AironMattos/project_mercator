@@ -6,12 +6,44 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Headline } from "@/components/headline";
 import { Input } from "@/components/ui/input";
+import { MethodologyTooltip } from "@/components/methodology-tooltip";
+import { QuebraCategoriaBars } from "@/components/quebra-categoria";
 import { RadiusMap } from "@/components/radius-map";
 import { RadiusResultsList } from "@/components/radius-results-list";
+import { SerieTemporalChart } from "@/components/serie-temporal-chart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BuscaRaioError, getBuscaRaio, type BuscaRaio, type Categoria } from "@/lib/api";
+import { formatarTaxaPct, formatarValorCompacto } from "@/lib/indicadores";
 import { formatarRaioM, mancheteBuscaRaio } from "@/lib/manchete";
 import { cn } from "@/lib/utils";
+
+function formatarDensidade(valor: number): string {
+  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(valor);
+}
+
+function FatoTile({
+  rotulo,
+  valor,
+  metodologia,
+}: {
+  rotulo: string;
+  valor: string;
+  metodologia?: { formula: string; ancora?: string };
+}) {
+  return (
+    <div className="flex-1 rounded-md border p-3">
+      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+        {rotulo}
+        {metodologia && (
+          <MethodologyTooltip titulo={rotulo} formula={metodologia.formula} ancora={metodologia.ancora} />
+        )}
+      </span>
+      <p className="mt-1 text-2xl font-semibold" style={{ fontVariantNumeric: "proportional-nums" }}>
+        {valor}
+      </p>
+    </div>
+  );
+}
 
 type RadiusSearchPanelProps = {
   categoriaId?: string;
@@ -149,6 +181,88 @@ export function RadiusSearchPanel({ categoriaId, nomeCategoria, categorias }: Ra
               </p>
             )}
           </div>
+
+          {estado.resultado.total > 0 && (
+            <>
+              <div className="flex flex-wrap gap-3">
+                <FatoTile
+                  rotulo="densidade comercial"
+                  valor={`${formatarDensidade(estado.resultado.densidadeKm2)}/km²`}
+                  metodologia={{
+                    formula: "Estabelecimentos ativos no raio dividido pela área do círculo de busca (π × raio²).",
+                    ancora: "densidade",
+                  }}
+                />
+                <FatoTile
+                  rotulo="aberturas no raio"
+                  valor={formatarValorCompacto(estado.resultado.aberturas)}
+                  metodologia={{
+                    formula: "Novos estabelecimentos identificados dentro do raio, no período coberto pelos eventos processados.",
+                    ancora: "aberturas",
+                  }}
+                />
+                <FatoTile
+                  rotulo="fechamentos no raio"
+                  valor={formatarValorCompacto(estado.resultado.fechamentos)}
+                  metodologia={{
+                    formula: "Estabelecimentos que desapareceram dentro do raio, no período coberto pelos eventos processados.",
+                    ancora: "fechamentos",
+                  }}
+                />
+                <FatoTile
+                  rotulo="saldo no raio"
+                  valor={formatarValorCompacto(estado.resultado.saldo)}
+                  metodologia={{ formula: "Aberturas menos fechamentos, dentro do raio.", ancora: "saldo" }}
+                />
+                {estado.resultado.turnover !== null && (
+                  <FatoTile
+                    rotulo="turnover"
+                    valor={formatarTaxaPct(estado.resultado.turnover)}
+                    metodologia={{
+                      formula: "(Aberturas + fechamentos) dividido pelo total de estabelecimentos ativos no raio.",
+                      ancora: "turnover",
+                    }}
+                  />
+                )}
+              </div>
+
+              {estado.resultado.comparacaoBairro && (
+                <p className="text-xs text-muted-foreground">
+                  Nesse raio: {formatarValorCompacto(estado.resultado.aberturas)} aberturas. No bairro{" "}
+                  {estado.resultado.comparacaoBairro.nome}:{" "}
+                  {estado.resultado.comparacaoBairro.aberturas.baseline !== null
+                    ? `média histórica de ${formatarValorCompacto(estado.resultado.comparacaoBairro.aberturas.baseline)} aberturas/mês`
+                    : "histórico insuficiente para uma média"}
+                  .
+                </p>
+              )}
+
+              {estado.resultado.quebraCategoria.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-xs text-muted-foreground">
+                    categorias que mais abriram no raio
+                  </p>
+                  <QuebraCategoriaBars itens={estado.resultado.quebraCategoria} />
+                </div>
+              )}
+
+              {estado.resultado.serieTemporal.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-xs text-muted-foreground">
+                    aberturas e fechamentos por mês no raio
+                  </p>
+                  <SerieTemporalChart
+                    pontos={estado.resultado.serieTemporal.map((p) => ({
+                      mes: p.mes,
+                      aberturas: p.aberturas,
+                      desaparecimentos: p.fechamentos,
+                    }))}
+                    compacto
+                  />
+                </div>
+              )}
+            </>
+          )}
 
           {estado.resultado.total === 0 && (
             <Alert>

@@ -1,3 +1,4 @@
+import { MethodologyTooltip } from "@/components/methodology-tooltip";
 import {
   corDelta,
   formatarDeltaPct,
@@ -22,6 +23,10 @@ type StatTileProps = {
    * em vez de omitir o tile ou mostrar zero, seção 3.3 do prompt. Se
    * omitido, cai no motivo genérico (motivoIndisponivelLegivel). */
   mensagemConstrucao?: string;
+  /** Fórmula/definição do indicador (checkpoint 11a) - todo tile numérico
+   * deve poder responder "como vocês chegaram nesse número?" sem sair da
+   * tela. Omitido só nos poucos casos sem contraparte em /metodologia. */
+  metodologia?: { formula: string; ancora?: string };
 };
 
 export function StatTile({
@@ -33,8 +38,18 @@ export function StatTile({
   motivoIndisponivel,
   cimaEBom,
   mensagemConstrucao,
+  metodologia,
 }: StatTileProps) {
   const semBaseline = baseline === null;
+
+  const rotuloComTooltip = (
+    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+      {rotulo}
+      {metodologia && (
+        <MethodologyTooltip titulo={rotulo} formula={metodologia.formula} ancora={metodologia.ancora} />
+      )}
+    </span>
+  );
 
   // Checkpoint 10d: quando motivoIndisponivel está presente, o número em
   // destaque (text-2xl) ao lado do aviso "em construção" contradizia o
@@ -43,7 +58,7 @@ export function StatTile({
   if (semBaseline) {
     return (
       <div className="flex-1 rounded-md border p-3">
-        <p className="text-xs text-muted-foreground">{rotulo}</p>
+        {rotuloComTooltip}
         <p className="mt-1 text-sm font-medium text-muted-foreground">
           {mensagemConstrucao ?? motivoIndisponivelLegivel(motivoIndisponivel)}
         </p>
@@ -59,7 +74,7 @@ export function StatTile({
 
   return (
     <div className="flex-1 rounded-md border p-3">
-      <p className="text-xs text-muted-foreground">{rotulo}</p>
+      {rotuloComTooltip}
       <p
         className="mt-1 text-2xl font-semibold"
         style={{ fontVariantNumeric: "proportional-nums" }}

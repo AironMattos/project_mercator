@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Headline } from "@/components/headline";
+import { MethodologyTooltip } from "@/components/methodology-tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkline } from "@/components/sparkline";
 import { getRanking, type RankingItem } from "@/lib/api";
@@ -12,6 +13,9 @@ import { mancheteRanking } from "@/lib/manchete";
 
 type Props = {
   categoriaId?: string;
+  /** "desc" (padrão) = maiores crescimentos; "asc" = maiores retrações
+   * (checkpoint 11b) - duas listas distintas, nunca misturadas. */
+  ordem?: "desc" | "asc";
   onSelecionarTerritorio: (territorioId: string, nome: string) => void;
 };
 
@@ -25,14 +29,14 @@ const LIMITE_RANKING = 20;
 // A lista de ranking é, além de porta de entrada alternativa ao mapa, a
 // "visão em tabela" acessível que todo painel de dado precisa - por isso
 // vive como uma lista clicável simples (ol/li/button), não um canvas.
-export function RankingList({ categoriaId, onSelecionarTerritorio }: Props) {
+export function RankingList({ categoriaId, ordem = "desc", onSelecionarTerritorio }: Props) {
   const [estado, setEstado] = useState<Estado>({ status: "carregando" });
 
   useEffect(() => {
     let cancelado = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- indicador de carregando pro refetch ao trocar categoria, não há como derivar isso do render.
     setEstado({ status: "carregando" });
-    getRanking({ categoriaId, limite: LIMITE_RANKING })
+    getRanking({ categoriaId, limite: LIMITE_RANKING, ordem })
       .then((ranking) => {
         if (!cancelado) {
           setEstado({
@@ -53,7 +57,7 @@ export function RankingList({ categoriaId, onSelecionarTerritorio }: Props) {
     return () => {
       cancelado = true;
     };
-  }, [categoriaId]);
+  }, [categoriaId, ordem]);
 
   if (estado.status === "carregando") {
     return (
@@ -84,7 +88,7 @@ export function RankingList({ categoriaId, onSelecionarTerritorio }: Props) {
         <AlertDescription>
           {estado.abaixoDoPisoVolume > 0
             ? `${estado.abaixoDoPisoVolume} bairro${estado.abaixoDoPisoVolume > 1 ? "s tiveram" : " teve"} crescimento calculável nesse filtro, mas com volume baixo demais (abaixo do piso mínimo) pra competir no ranking principal.`
-            : "Não há histórico suficiente pra calcular crescimento nesse filtro ainda."}
+            : `Não há histórico suficiente pra calcular ${ordem === "asc" ? "retração" : "crescimento"} nesse filtro ainda.`}
         </AlertDescription>
       </Alert>
     );
@@ -92,13 +96,18 @@ export function RankingList({ categoriaId, onSelecionarTerritorio }: Props) {
 
   return (
     <div className="flex flex-1 flex-col gap-3">
-      <Headline>{mancheteRanking(estado.itens)}</Headline>
+      <Headline>{mancheteRanking(estado.itens, ordem)}</Headline>
       <div className="flex-1 overflow-y-auto rounded-md border">
-        <p className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-          bairros ordenados por crescimento de aberturas frente ao baseline dos últimos 24
-          meses — {estado.itens[0].total} elegíveis
+        <p className="flex items-center gap-1 border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+          bairros ordenados por {ordem === "asc" ? "retração" : "crescimento"} de aberturas
+          frente ao baseline dos últimos 24 meses — {estado.itens[0].total} elegíveis
           {estado.abaixoDoPisoVolume > 0 &&
             ` · ${estado.abaixoDoPisoVolume} abaixo do piso mínimo de volume, não exibidos`}
+          <MethodologyTooltip
+            titulo="variação %"
+            formula="(valor atual - baseline) / baseline, onde baseline é a média móvel dos 24 meses anteriores."
+            ancora="baseline"
+          />
         </p>
         <ol className="divide-y">
         {estado.itens.map((item) => (

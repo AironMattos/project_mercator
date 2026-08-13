@@ -1,0 +1,5 @@
+.libPaths(c("C:/Users/Airon/Documents/R/win-library/4.6", .libPaths()))
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+install.packages("geocodebr", lib = "C:/Users/Airon/Documents/R/win-library/4.6", type = "binary")
+cat("INSTALLED PACKAGES:\n")
+print(rownames(installed.packages(lib.loc = "C:/Users/Airon/Documents/R/win-library/4.6")))

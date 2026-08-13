@@ -8,6 +8,22 @@ export function formatarValorCompacto(valor: number): string {
   return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(Math.round(valor));
 }
 
+// "92,4%" - uma casa decimal, para os fatos de qualidade de dado (seção
+// "QUALIDADE DOS DADOS" do prompt de referência usa exemplos com uma casa:
+// "92,4% possuem localização geográfica válida").
+export function formatarPercentual1(valor: number): string {
+  return `${new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(valor)}%`;
+}
+
+// "1%" - taxa simples (ex.: turnover), sem o sinal +/- de formatarDeltaPct.
+// Diferente de uma variação percentual, uma taxa não é "acima/abaixo de um
+// baseline" - o "+" de formatarDeltaPct aqui sugeriria uma comparação que
+// não existe (checkpoint 11d: turnover é (aberturas+fechamentos)/estoque,
+// não uma variação de nada).
+export function formatarTaxaPct(valor: number): string {
+  return `${Math.round(valor * 100)}%`;
+}
+
 // "+89%" / "-12%" / "0%" - sinal sempre explícito pra positivo, nunca só o
 // número nu (seção 3.1: "sinal explícito").
 export function formatarDeltaPct(variacaoPct: number | null): string {

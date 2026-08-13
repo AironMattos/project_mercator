@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -36,6 +36,24 @@ class MetricaComercioOut(BaseModel):
 class CoberturaTemporalOut(BaseModel):
     mes_inicio: date | None
     mes_fim: date | None
+
+
+class QualidadeDadosOut(BaseModel):
+    """Fatos objetivos sobre a base, sem nota/score - seção "QUALIDADE DOS
+    DADOS" do prompt de referência da fase de inteligência territorial.
+    `pct_localizacao_valida` conta confianca alta+media como "válida"
+    (mesmo corte de CONFIANCAS_NA_CONTAGEM_PRINCIPAL em busca_raio.py -
+    'baixa' é a confiança que já é tratada como "não confiável o
+    suficiente pra uso espacial" no resto do produto)."""
+
+    total_estabelecimentos: int
+    geocodificados_alta: int
+    geocodificados_media: int
+    geocodificados_baixa: int
+    nao_geocodificados: int
+    pct_localizacao_valida: float
+    cobertura_temporal: CoberturaTemporalOut
+    ultima_atualizacao: datetime | None
 
 
 class IndicadorOut(BaseModel):
@@ -78,6 +96,40 @@ class RankingOut(BaseModel):
     abaixo_do_piso_volume: int
 
 
+class RankingCategoriaItemOut(BaseModel):
+    categoria_id: str
+    nome: str
+    valor_atual: float
+    baseline: float | None
+    variacao_pct: float | None
+    tendencia: str | None
+    posicao: int
+    total: int
+
+
+class RankingCategoriasOut(BaseModel):
+    itens: list[RankingCategoriaItemOut]
+    # Mesmo padrão de RankingOut.abaixo_do_piso_volume - visível, não
+    # escondido.
+    abaixo_do_piso_volume: int
+
+
+class SinalOut(BaseModel):
+    territorio_id: str
+    nome: str
+    descricao: str
+    meses_consecutivos: int
+
+
+class SinaisOut(BaseModel):
+    itens: list[SinalOut]
+    # Texto exato do critério usado para gerar `itens` - nunca um score
+    # escondido (seção "SINAIS E DESTAQUES" do prompt de referência).
+    criterio: str
+    periodo_referencia: date | None
+    motivo_indisponivel: str | None
+
+
 class QuebraCategoriaOut(BaseModel):
     categoria_id: str | None
     nome: str
@@ -94,6 +146,14 @@ class BairroResumoOut(BaseModel):
     total_ranking: int | None
     quebra_categoria: list[QuebraCategoriaOut]
     serie_temporal: list[MetricaComercioOut]
+
+
+class ComparacaoOut(BaseModel):
+    # Mesmo formato de BairroResumoOut, lado a lado - nenhuma nota/ranking
+    # agregado comparando os itens entre si (seção "COMPARAÇÃO" do prompt
+    # de referência: a comparação apresenta os dados, não decide "qual
+    # bairro é melhor").
+    itens: list[BairroResumoOut]
 
 
 class GeoJsonFeature(BaseModel):
@@ -123,6 +183,22 @@ class EstabelecimentoRaioOut(BaseModel):
     ponto: PontoOut
 
 
+class PontoSerieRaioOut(BaseModel):
+    mes: date
+    aberturas: int
+    fechamentos: int
+
+
+class ComparacaoBairroRaioOut(BaseModel):
+    # Mesmo indicador de aberturas exposto em /bairros/{id}/resumo pro
+    # bairro majoritário entre os estabelecimentos do raio - dois números
+    # com o mesmo rótulo lado a lado, nunca um score comparando os dois
+    # (mesmo princípio da seção "COMPARAÇÃO" aplicado aqui).
+    territorio_id: str
+    nome: str
+    aberturas: IndicadorOut
+
+
 class BuscaRaioOut(BaseModel):
     endereco_buscado: str
     ponto_busca: PontoOut
@@ -134,3 +210,22 @@ class BuscaRaioOut(BaseModel):
     # com confianca='baixa' (não entram na contagem principal) - checkpoint
     # 9, seção 5.
     excluidos_baixa_confianca: int
+    # Investigação por endereço evoluída (checkpoint 11d) - densidade não
+    # depende de nenhuma geometria de bairro, só da área do próprio círculo
+    # de busca (raio conhecido analiticamente). aberturas/fechamentos/saldo
+    # vêm de eventos geolocalizados dentro do raio - histórico real curto
+    # (mesma limitação documentada em /metodologia), por isso não têm
+    # baseline/tendência aqui, só a contagem do período coberto.
+    densidade_km2: float
+    aberturas: int
+    fechamentos: int
+    saldo: int
+    # None quando não há estabelecimento nenhum no raio (estoque=0,
+    # turnover indefinido - mesma lógica de baseline_zero em indicadores.py,
+    # não é "infinito").
+    turnover: float | None
+    quebra_categoria: list[QuebraCategoriaOut]
+    serie_temporal: list[PontoSerieRaioOut]
+    # None quando o raio não tem nenhum estabelecimento com bairro
+    # resolvido.
+    comparacao_bairro: ComparacaoBairroRaioOut | None

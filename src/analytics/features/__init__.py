@@ -15,6 +15,7 @@ from analytics.features.indicadores import (
     calcular_baseline,
     calcular_ranking,
     calcular_tendencia,
+    detectar_saldo_negativo_consecutivo,
 )
 from analytics.features.models import (
     Baseline,
@@ -37,6 +38,7 @@ __all__ = [
     "calcular_baseline",
     "calcular_tendencia",
     "calcular_ranking",
+    "detectar_saldo_negativo_consecutivo",
     "MOTIVO_HISTORICO_INSUFICIENTE",
     "MOTIVO_BASELINE_ZERO",
     "MESES_JANELA_BASELINE_PADRAO",

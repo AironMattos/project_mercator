@@ -6,6 +6,7 @@ from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import Session
 
 from analytics.features import ContagemEventos as ContagemEventosDominio
+from analytics.features import PontoMensal
 from infrastructure.database.orm.contagem_eventos import (
     ContagemEventos as ContagemEventosORM,
 )
@@ -104,6 +105,40 @@ def consultar_metricas_comercio(
                 "aberturas": int(row.aberturas or 0),
                 "desaparecimentos": int(row.desaparecimentos or 0),
             }
+        )
+    return resultado
+
+
+def consultar_saldo_mensal_todos_bairros(session: Session) -> dict[str, list[PontoMensal]]:
+    """Saldo (aberturas - desaparecimentos) por bairro e mês, direto de
+    analytics.contagem_eventos - mesma fonte/mesmo cálculo de
+    indicador_saldo_bairro (servico_indicadores.py), mas para todos os
+    bairros de uma vez numa única query (checkpoint 11b: sinais de saldo
+    negativo consecutivo precisam varrer todo mundo, não um bairro por
+    vez). Não é zero-preenchida - ausência de mês aqui significa "não
+    processamos essa comparação de snapshot", nunca "saldo zero" (mesma
+    convenção de indicador_saldo_bairro).
+    """
+    tabela = ContagemEventosORM
+    aberturas = func.sum(
+        case(
+            (tabela.event_type.in_(("PRIMEIRA_OBSERVACAO", "ABERTURA_CONFIRMADA")), tabela.contagem),
+            else_=0,
+        )
+    )
+    desaparecimentos = func.sum(
+        case((tabela.event_type == "DESAPARECIMENTO", tabela.contagem), else_=0)
+    )
+    stmt = (
+        select(tabela.territorio_id, tabela.mes, aberturas, desaparecimentos)
+        .where(tabela.territorio_id.isnot(None))
+        .group_by(tabela.territorio_id, tabela.mes)
+    )
+
+    resultado: dict[str, list[PontoMensal]] = {}
+    for territorio_id, mes, ab, des in session.execute(stmt):
+        resultado.setdefault(territorio_id, []).append(
+            PontoMensal(mes=mes, valor=float((ab or 0) - (des or 0)))
         )
     return resultado
 

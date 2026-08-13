@@ -95,6 +95,39 @@ def series_aberturas_todos_bairros(
     }
 
 
+def series_aberturas_por_categoria(
+    session: Session,
+    *,
+    territorio_id: str | None,
+    mes_referencia: date,
+    meses_historico: int = MESES_HISTORICO_PADRAO,
+) -> dict[str, list[PontoMensal]]:
+    """Mesma série de series_aberturas_todos_bairros, mas agrupada por
+    categoria_id em vez de territorio_id - cidade inteira por padrão, ou
+    um bairro específico via `territorio_id` (checkpoint 11b: "categorias
+    em alta/em queda" no Radar, cidade inteira; a mesma função também serve
+    o perfil de um bairro específico). Categoria não resolvida
+    (categoria_id IS NULL) fica de fora - não dá pra rankear "sem
+    categoria".
+    """
+    tabela = ContagemInicioAtividade
+    stmt = select(tabela.categoria_id, tabela.mes, func.sum(tabela.contagem)).where(
+        tabela.categoria_id.isnot(None)
+    )
+    if territorio_id is not None:
+        stmt = stmt.where(tabela.territorio_id == territorio_id)
+    stmt = stmt.group_by(tabela.categoria_id, tabela.mes)
+
+    contagens: dict[str, dict[date, float]] = {}
+    for categoria_id, mes, soma in session.execute(stmt):
+        contagens.setdefault(categoria_id, {})[mes] = float(soma)
+
+    return {
+        categoria_id: _zero_fill(por_mes, mes_referencia, meses_historico)
+        for categoria_id, por_mes in contagens.items()
+    }
+
+
 def quebra_categoria_aberturas_bairro(
     session: Session,
     *,

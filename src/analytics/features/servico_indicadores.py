@@ -27,14 +27,17 @@ from analytics.features.indicadores import (
     calcular_baseline,
     calcular_ranking,
     calcular_tendencia,
+    detectar_saldo_negativo_consecutivo,
 )
 from infrastructure.database.repositories.feature_repository import (
     consultar_cobertura_temporal,
     consultar_metricas_comercio,
+    consultar_saldo_mensal_todos_bairros,
 )
 from infrastructure.database.repositories.indicador_repository import (
     quebra_categoria_aberturas_bairro,
     serie_aberturas_bairro,
+    series_aberturas_por_categoria,
     series_aberturas_todos_bairros,
 )
 
@@ -50,6 +53,10 @@ from infrastructure.database.repositories.indicador_repository import (
 MOTIVO_MES_INCOMPLETO = "mes_incompleto"
 
 MESES_SPARKLINE = 12
+
+# Critério do sinal "saldo negativo consecutivo" (checkpoint 11b) - texto
+# explícito, exposto pela API, não escondido atrás de um índice.
+MESES_SINAL_SALDO_NEGATIVO = 4
 
 
 def _mes_anterior(mes: date) -> date:
@@ -203,6 +210,7 @@ def montar_ranking_aberturas(
     categoria_id: str | None,
     mes_referencia: date,
     limite: int | None = None,
+    ordem: str = "desc",
 ) -> tuple[list[ItemRanking], dict[str, list[PontoMensal]], int]:
     """Devolve o ranking, os últimos MESES_SPARKLINE pontos da série de
     cada bairro elegível, e a contagem de bairros abaixo do piso mínimo de
@@ -242,7 +250,7 @@ def montar_ranking_aberturas(
         and item.baseline < BASELINE_MINIMO_RANKING
     )
 
-    ranking = calcular_ranking(itens)
+    ranking = calcular_ranking(itens, ordem=ordem)
     if limite is not None:
         ranking = ranking[:limite]
 
@@ -264,3 +272,81 @@ def quebra_categoria_bairro(
     return quebra_categoria_aberturas_bairro(
         session, territorio_id=territorio_id, mes_referencia=mes_referencia, limite=limite
     )
+
+
+def montar_ranking_categorias(
+    session: Session,
+    *,
+    territorio_id: str | None,
+    mes_referencia: date,
+    limite: int | None = None,
+    ordem: str = "desc",
+) -> tuple[list[ItemRanking], int]:
+    """Ranking de categorias por crescimento de aberturas - mesma mecânica
+    de montar_ranking_aberturas (mesmo cálculo de baseline/tendência/
+    ranking, mesmo piso mínimo de volume), mas agrupado por categoria_id em
+    vez de território: cidade inteira por padrão, ou um bairro específico
+    via `territorio_id` (checkpoint 11b - "categorias em alta/em queda" no
+    Radar).
+
+    Reaproveita calcular_baseline/calcular_tendencia/calcular_ranking como
+    estão: o campo `territorio_id` de ItemComBaseline/ItemRanking é só uma
+    chave de agrupamento opaca - aqui alimentada com categoria_id
+    deliberadamente, não um erro de nomenclatura (evita duplicar essas três
+    funções puras só por causa do nome do campo).
+    """
+    series = series_aberturas_por_categoria(
+        session, territorio_id=territorio_id, mes_referencia=mes_referencia
+    )
+
+    itens = []
+    for categoria_id, serie in series.items():
+        valor_atual = _valor_no_mes(serie, mes_referencia)
+        baseline = calcular_baseline(serie, mes_referencia, valor_atual)
+        tendencia = calcular_tendencia(serie, mes_referencia)
+        itens.append(
+            ItemComBaseline(
+                territorio_id=categoria_id,
+                valor_atual=valor_atual,
+                baseline=baseline.baseline,
+                variacao_pct=baseline.variacao_pct,
+                tendencia=tendencia.classificacao,
+            )
+        )
+
+    abaixo_do_piso = sum(
+        1
+        for item in itens
+        if item.variacao_pct is not None
+        and item.baseline is not None
+        and item.baseline < BASELINE_MINIMO_RANKING
+    )
+
+    ranking = calcular_ranking(itens, ordem=ordem)
+    if limite is not None:
+        ranking = ranking[:limite]
+    return ranking, abaixo_do_piso
+
+
+def montar_sinais_saldo_negativo(
+    session: Session, *, minimo_meses: int = MESES_SINAL_SALDO_NEGATIVO
+) -> tuple[list[str], date | None]:
+    """Bairros com saldo líquido negativo nos `minimo_meses` meses fechados
+    mais recentes (critério simples e explícito, seção "SINAIS E DESTAQUES"
+    do prompt de referência - não um score). Devolve os territorio_id
+    elegíveis e o mes_referencia usado (None se não houver nenhum mês de
+    saldo processado ainda - hoje o caso mais comum, com só 1-2 meses reais
+    de fato_evento_territorial: o critério de 4 meses nunca dispara, e isso
+    é esperado, não um bug).
+    """
+    _, mes_fim = consultar_cobertura_temporal(session)
+    if mes_fim is None:
+        return [], None
+
+    series = consultar_saldo_mensal_todos_bairros(session)
+    sinalizados = [
+        territorio_id
+        for territorio_id, serie in series.items()
+        if detectar_saldo_negativo_consecutivo(serie, mes_fim, minimo_meses=minimo_meses)
+    ]
+    return sinalizados, mes_fim

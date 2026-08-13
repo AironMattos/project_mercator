@@ -841,6 +841,241 @@ limpos. Testado no navegador contra a API/banco reais: mapa principal e busca po
 nomes visíveis e coroplético/marcadores legíveis; busca por raio em 500m e 2km, lista ordenada
 por distância, paginação em 50 confirmada com 805 e 16.759 resultados.
 
+## Fase de inteligência territorial (checkpoints 11a-11e)
+
+Depois do checkpoint 10 (identidade editorial), o dono pediu uma fase maior: transformar o
+protótipo de "ferramenta de consulta de dado" em produto de inteligência territorial
+demonstrável, estruturado em 4 experiências (Radar, Perfil do Território, Investigação por
+Endereço, Comparação), com uma restrição central do prompt de referência dessa fase: **nenhuma
+métrica proprietária/score composto** - tudo precisa ser fórmula simples, documentada e
+reproduzível ("se um usuário perguntar 'como vocês chegaram nesse número?', o produto precisa
+responder de forma objetiva"). Planejada em 5 checkpoints (11a-11e); decisão tomada com o dono
+antes de começar: ruas/corredores dentro do perfil de bairro ficam fora de escopo (endereço
+bruto do alvará não é normalizado, uma quebra por rua duplicaria corredores por variação de
+grafia) - registrado como limitação de dado na Metodologia, não implementado.
+
+### Checkpoint 11a - Credibilidade: metodologia + qualidade de dados: **concluído**
+
+Fundação para o resto da fase - sem isso, nenhum tooltip de metodologia teria o que
+referenciar.
+
+- `GET /qualidade-dados` novo (`apps/api/routers/metodologia.py`) - reaproveita
+  `geolocalizacao_repository.contar_por_confianca` (já existia, não exposto via API) +
+  `feature_repository.consultar_cobertura_temporal` (já existia). Duas peças novas, pequenas:
+  `geolocalizacao_repository.contar_entidades_comercio` (total de entidades tipo `comercio`,
+  denominador do percentual) e `pipeline_run_repository.ultima_execucao_com_sucesso` (novo
+  arquivo, primeiro repositório dedicado a `infra.pipeline_run` - só um `MAX(finalizado_em)`
+  filtrado por `status='sucesso'`). Resposta: contagens cruas por confiança de geolocalização,
+  `pct_localizacao_valida` (alta+media / total - mesmo corte de confiança que
+  `CONFIANCAS_NA_CONTAGEM_PRINCIPAL` já usa em `busca_raio.py`), cobertura temporal, última
+  atualização. Nenhum número aqui é ponderado ou combinado - são fatos diretos, seguindo a
+  restrição do prompt.
+- `apps/web/src/app/metodologia/page.tsx` - página nova (rota estática), com uma seção por
+  fórmula usada em qualquer tela do produto (baseline, variação %, tendência, saldo,
+  participação, densidade, turnover - os dois últimos definidos aqui mesmo sem uso ainda,
+  fórmula documentada antes de a métrica aparecer em tela), metodologia de geocodificação
+  (resumo do que já estava documentado no checkpoint 9), e limitações conhecidas (cobertura de
+  2 snapshots, ~6% de bairro não resolvido, ~34% de CNAE não normalizável, ruas/corredores fora
+  de escopo).
+- `MethodologyTooltip` (`components/methodology-tooltip.tsx`) - componente novo do design
+  system pedido pelo prompt: ícone `Info` (lucide-react) com um `Popover` (shadcn) mostrando a
+  fórmula e um link pra âncora certa em `/metodologia`. `StatTile` ganhou um prop opcional
+  `metodologia` que renderiza esse tooltip ao lado do rótulo, sem mudar layout existente -
+  ligado nos dois tiles já em uso (`aberturas`/`saldo` do painel de detalhe de bairro).
+- `DataQuality` (`components/data-quality.tsx`) - componente novo do design system, fatos crus
+  de `/qualidade-dados` sem nota. `DataQualitySection` (client component separado) busca o
+  dado; a página `/metodologia` em si continua um server component estático.
+- Link "Metodologia" adicionado ao cabeçalho do Radar (`dashboard.tsx`), ao lado das Tabs.
+
+**Rodado contra o banco/API/frontend reais**: `GET /qualidade-dados` real devolveu 515.118
+estabelecimentos, 73,2% com localização válida (confirma o resultado do checkpoint 9b: 73,2%
+`alta` direto na primeira passagem, sem nenhuma `media` ainda porque a segunda passagem via
+Nominatim segue pausada por decisão pendente), última atualização 11/08/2026. Testado no
+navegador (via workaround de IP de LAN - ver Notas operacionais): `/metodologia` renderiza
+todas as seções com o dado real; tooltip de metodologia no painel de detalhe de bairro abre
+com a fórmula certa e o link para a âncora. 2 testes novos (`tests/api/test_metodologia.py`).
+`npm run build`/`lint`/`tsc` limpos. Total do projeto: **162 testes Python passando**.
+
+### Checkpoint 11b - Radar: crescimento/retração + ranking por categoria + sinais: **concluído**
+
+- `calcular_ranking` (`indicadores.py`) ganhou um parâmetro `ordem: "desc"|"asc"` (default
+  `"desc"`, comportamento anterior intocado) - inverte o sinal da chave de ordenação em vez de
+  duplicar a função. "Maiores crescimentos" e "maiores retrações" (seção "RADAR" do prompt de
+  referência: nunca misturar as duas numa lista só) são a mesma mecânica, duas chamadas.
+- `series_aberturas_por_categoria` (`indicador_repository.py`, novo) - mesmo padrão de
+  `series_aberturas_todos_bairros`, agrupado por `categoria_id` em vez de `territorio_id`
+  (cidade inteira por padrão, ou um bairro via `territorio_id` opcional; `categoria_id IS NULL`
+  excluído - não dá pra rankear "sem categoria"). `montar_ranking_categorias`
+  (`servico_indicadores.py`, novo) reaproveita `calcular_baseline`/`calcular_tendencia`/
+  `calcular_ranking` **como estão** - o campo `territorio_id` de `ItemComBaseline`/`ItemRanking`
+  é só uma chave de agrupamento opaca, aqui alimentada com `categoria_id` deliberadamente (não
+  duplica as três funções puras só por causa do nome do campo).
+- `GET /ranking/comercio` ganhou `ordem` (query param); `GET /ranking/categorias` novo, mesma
+  forma de resposta sem o campo `serie` (a API de categoria não tem sparkline).
+- Sinais: `detectar_saldo_negativo_consecutivo` (`indicadores.py`, pura) - critério fixo e
+  documentado (4 meses fechados consecutivos com saldo < 0), não um score. `GET /sinais` novo,
+  varre `analytics.contagem_eventos` de todos os bairros de uma vez
+  (`consultar_saldo_mensal_todos_bairros`, novo em `feature_repository.py`). **Hoje a base só
+  tem 1-2 meses reais de evento processado** - o critério nunca encontra ninguém elegível ainda;
+  a API comunica isso (`motivo_indisponivel`/lista vazia com explicação), não esconde atrás de
+  "nenhum sinal" sem contexto. Vai passar a popular sozinho conforme mais snapshots forem
+  processados, sem mudança de código.
+- Frontend: `RadarRankingPanel` (novo) - dois seletores independentes (escopo: Bairros/
+  Categorias; ordem: Maiores crescimentos/Maiores retrações), nunca uma métrica só combinando
+  os dois eixos. `CategoryRankingList` (novo, mesmo padrão visual de `RankingList`, sem
+  sparkline) e `SinaisPanel` (novo) completam a aba "Ranking de crescimento". Selecionar uma
+  categoria no ranking aplica ela como filtro global (mesmo combobox do cabeçalho) - efeito
+  visível ao trocar pra aba Mapa. `mancheteRanking`/nova `mancheteRankingCategorias` (`lib/
+  manchete.ts`) ganharam o parâmetro `ordem` pra frasear crescimento vs. retração corretamente.
+- **Bug real encontrado na checagem visual, não no código**: depois de editar os arquivos do
+  backend, o processo `uvicorn` que já estava rodando (iniciado no checkpoint 11a, sem
+  `--reload`) continuou servindo o código antigo - `ordem=asc` no filtro do navegador mostrava a
+  mesma lista de `ordem=desc`. Sintoma confirmado com `curl` direto (resposta idêntica pros dois
+  valores de `ordem`) antes de suspeitar do processo, não do código - `calcular_ranking` já
+  tinha 2 testes passando pra `ordem="asc"`. Corrigido matando os processos `uvicorn` órfãos
+  (havia 4 escutando, remanescentes de sessões anteriores - mesmo padrão de instabilidade de
+  `--reload` já registrado nas Notas operacionais, mas dessa vez sem `--reload` nenhum) e
+  subindo um processo novo. Reforça a nota operacional existente: reiniciar o `uvicorn`
+  manualmente depois de qualquer mudança no backend, não assumir que está atualizado.
+- **Rodado contra o banco/API/frontend reais**: `/ranking/categorias?ordem=asc` real -
+  "Associações e organizações religiosas" lidera a retração (-100%, categoria com poucos
+  registros, mesmo padrão de ruído de baixo volume documentado no piso mínimo);
+  `/ranking/comercio?ordem=asc` - ATUBA lidera com -95% (1 abertura vs. baseline ~20). Testado
+  no navegador: alternar Bairros/Categorias e Crescimento/Retração recalcula a lista e a
+  manchete corretamente nas 4 combinações; painel de sinais mostra o critério e a mensagem
+  correta de indisponibilidade. 9 testes novos (6 em `test_indicadores.py`, 3 em
+  `test_ranking_categorias_e_sinais.py`). `npm run build`/`lint`/`tsc` limpos. Total do
+  projeto: **171 testes Python passando**.
+
+### Checkpoint 11c - Comparação de territórios: **concluído**
+
+Sem lógica de negócio nova - reaproveita `/bairros/{id}/resumo` inteiro, chamado N vezes no
+backend em vez de N chamadas sequenciais do frontend.
+
+- `apps/api/routers/bairros.py`: o corpo de `bairro_resumo` foi fatorado em
+  `_montar_resumo_bairro` (mesma assinatura, devolve `None` em vez de levantar 404 - quem chama
+  decide o que fazer com um id inválido). `GET /bairros/comparar?ids=a,b,c,d` novo - valida
+  2-4 ids (422 fora da faixa), 404 se algum território não existir (lista todos os inválidos
+  na mensagem, não só o primeiro), monta a lista chamando a função fatorada em loop.
+  `ComparacaoOut` (schema novo) = `{ itens: [BairroResumoOut, ...] }`, mesmo formato do
+  endpoint individual - conferido em teste que o item de `/bairros/comparar` é **byte a byte
+  igual** ao de `/bairros/{id}/resumo` pro mesmo bairro.
+- Frontend: `TerritorioMultiSelect` (novo) - combobox pesquisável (`Command`/`Popover`,
+  primeiro uso desses componentes no projeto) + chips removíveis, máximo 4. `ComparisonTable`
+  (novo, componente do design system pedido pelo prompt) - linhas = métrica, colunas = bairro,
+  **nenhuma nota agregada** decidindo qual bairro é "melhor" (restrição explícita da seção
+  "COMPARAÇÃO" do prompt de referência). `apps/web/src/app/comparacao/page.tsx` (rota nova) -
+  seletor de bairros + filtro de categoria/período (presets apenas, sem intervalo
+  personalizado - simplificação deliberada, não esquecimento) + tabela + evolução temporal +
+  composição por categoria.
+- **Decisão de forma pro gráfico de evolução temporal, via skill `dataviz`**: a paleta
+  categórica de 8 cores do skill não tem nenhuma ordenação de 4 cores que passe a checagem
+  all-pairs (`validate_palette.js --pairs all`) sem reservar azul/vermelho, que já carregam
+  outro significado neste produto (saldo positivo/negativo no mapa e nos stat tiles) - usar
+  essas cores pra identidade de bairro colidiria semanticamente. Em vez de forçar uma 4ª cor
+  categórica arriscada, a evolução temporal virou **small multiples** (um mini-gráfico por
+  bairro, grade 2 colunas) reaproveitando exatamente o par aberturas(azul)/desaparecimentos
+  (laranja) já usado em `detail-panel.tsx` - elimina o problema de cor por completo, mesmo
+  significado em toda tela do produto. `SerieTemporalChart` (novo,
+  `components/serie-temporal-chart.tsx`) foi extraído do gráfico inline de `detail-panel.tsx`
+  pra ser reaproveitado nos dois lugares sem duplicar configuração - `detail-panel.tsx`
+  também foi atualizado pra usá-lo (comportamento idêntico, só a duplicação removida).
+- **Bug real encontrado na checagem visual**: o combobox de categoria da página nova mostrava
+  "todas" (o `categoria_id` interno usado como sentinela) em vez de "Todas as categorias" - a
+  função de formatação tratava qualquer valor truthy como um id de categoria de verdade, sem
+  checar o caso sentinela primeiro (mesma classe de bug do achado já registrado no checkpoint
+  9e, mas dessa vez pego antes de virar dívida). Corrigido checando `valor === TODAS_CATEGORIAS`
+  antes de consultar a lista de categorias.
+- **Reforço da nota operacional do checkpoint 11b**: de novo o `uvicorn` precisou ser
+  reiniciado manualmente depois da mudança de backend (`bairros.py` fatorado + endpoint novo) -
+  virou hábito checar isso a cada checkpoint desta fase antes da verificação visual, não só
+  quando algo parece errado.
+- **Rodado contra o banco/API/frontend reais**: testado no navegador com CENTRO + BATEL -
+  tabela mostra aberturas/saldo/posição/categoria principal lado a lado, saldo em "dado em
+  construção" pros dois (mesma limitação real de histórico curto documentada em checkpoints
+  anteriores), os dois mini-gráficos e as duas quebras de categoria renderizam corretamente.
+  4 testes novos (`tests/api/test_bairros_comparar.py`). `npm run build`/`lint`/`tsc` limpos.
+  Total do projeto: **175 testes Python passando**.
+
+### Checkpoint 11d - Investigação por endereço evoluída: **concluído**
+
+Maior pedaço de trabalho genuinamente novo da fase - `/busca-raio` só devolvia um censo de
+estabelecimentos ativos, sem abertura/fechamento/tendência nenhuma.
+
+- `geolocalizacao_repository.eventos_no_raio` (novo) - junta `events.fato_evento_territorial`
+  (tem `entidade_id`) com `canonical.geolocalizacao_entidade` (tem `ponto`) via `entidade_id`,
+  mesmo `ST_DWithin`/corte de confiança (alta/média) de `buscar_no_raio`. Tabela de eventos é
+  pequena (milhares de linhas, não ~515 mil) - sem custo de performance filtrar em Python
+  depois, ao contrário de uma busca contra `observacao_entidade`.
+- **Densidade não depende de geometria de bairro nenhuma** - decisão de escopo do checkpoint:
+  a área do círculo de busca é conhecida analiticamente (`π × raio²`), então
+  `densidade_km2 = estabelecimentos_ativos / área_do_círculo`. Evita ter que calcular/armazenar
+  área de bairro só para isso.
+- Turnover = `(aberturas + fechamentos) / estoque`, onde estoque é o `total` que
+  `buscar_no_raio` já devolve (mesma definição documentada em `/metodologia`: "estabelecimentos
+  com alvará identificado no snapshot mais recente"). `None` quando não há nenhum
+  estabelecimento no raio (estoque=0, mesma lógica de `baseline_zero` em `indicadores.py` - não
+  é "infinito").
+- Comparação com o bairro: resolve o `territorio_id` majoritário entre os estabelecimentos do
+  raio e reaproveita `indicador_aberturas_bairro` (já existente, checkpoint 8b) pra mostrar a
+  média histórica desse bairro ao lado do número do raio - dois fatos com o mesmo rótulo, nunca
+  um score comparando os dois.
+- `GET /busca-raio` estendido: `densidade_km2`, `aberturas`, `fechamentos`, `saldo`, `turnover`,
+  `quebra_categoria` (top 5, mesmo formato de `quebra_categoria_bairro`), `serie_temporal`
+  (mensal, sem baseline/tendência - histórico real curto demais pra isso, mesma limitação
+  documentada em toda a fase), `comparacao_bairro` (`None` quando nenhum estabelecimento do raio
+  tem bairro resolvido).
+- Frontend: `radius-search-panel.tsx` ganhou 5 `FatoTile` (componente local novo, mais simples
+  que `StatTile` - esses números não têm baseline/tendência) com `MethodologyTooltip`,
+  `QuebraCategoriaBars` e `SerieTemporalChart` (o mesmo extraído no checkpoint 11c)
+  reaproveitados sem mudança.
+- **Achado de forma corrigido antes de finalizar**: a primeira versão exibia turnover com
+  `formatarDeltaPct` (o formatador de variação percentual, que força um sinal `+`/`-`) - errado
+  porque turnover é uma taxa, não uma comparação com baseline nenhum; o `+1%` sugeria uma
+  "melhora" que não existe no conceito. Corrigido com `formatarTaxaPct` (novo, sem sinal
+  forçado) em `lib/indicadores.ts`.
+- **Rodado contra o banco/API/frontend reais**: endereço "AV. PRESIDENTE WENCESLAU BRAZ, 1893"
+  (mesmo endereço testado no checkpoint 9d) - 1km: 3.767 estabelecimentos (bate com o número já
+  registrado), densidade 1.199,1/km², 8 aberturas, 25 fechamentos, saldo -17, turnover 1%,
+  comparação "No bairro GUAÍRA: média histórica de 12 aberturas/mês". 2km: 16.759
+  estabelecimentos (bate com o checkpoint 9g), densidade 1.333,6/km². Tooltips de metodologia
+  visíveis em cada tile. 5 testes novos (`tests/api/test_busca_raio.py`) cobrindo densidade,
+  ausência de evento, turnover `None` sem estabelecimento no raio, e comparação com bairro.
+  `npm run build`/`lint`/`tsc` limpos. Total do projeto: **180 testes Python passando**.
+
+### Checkpoint 11e - Passe de design system e polimento: **concluído**
+
+Consolidação depois que 11a-11d já geraram os componentes reais em uso - não feature nova.
+
+- **Participação por categoria** (métrica explicitamente listada no prompt de referência, seção
+  "TIPOS DE MÉTRICAS PERMITIDAS") estava documentada em `/metodologia#participacao` mas nunca
+  aparecia calculada em tela - `QuebraCategoriaBars` só mostrava contagem bruta. Corrigido num
+  único lugar (o componente é reaproveitado em 3 telas: perfil de bairro, comparação, busca por
+  raio) - cada barra agora mostra `contagem (participação%)`, reaproveitando
+  `formatarPercentual1` já existente.
+- Auditoria do critério de sucesso #9 do prompt ("não encontrar nenhum indicador cuja
+  metodologia não esteja clara"): `ComparisonTable` (aberturas/saldo/posição no ranking) e as
+  legendas de `RankingList`/`CategoryRankingList` (variação %) não tinham `MethodologyTooltip` -
+  adicionado nos três lugares, reaproveitando o mesmo texto de fórmula já usado no `StatTile`
+  do painel de detalhe (não inventado de novo). `/comparacao` ganhou o link "Metodologia" no
+  cabeçalho, pelo mesmo motivo que `/radar` já tinha (checkpoint 11a).
+- Revisão de duplicação de componente: `RankingList`/`CategoryRankingList` continuam
+  separados (representam dados genuinamente diferentes - um tem sparkline, o outro não; a
+  duplicação é pequena e clara) - não forçada uma abstração comum só por semelhança visual,
+  conforme o princípio do projeto contra abstração prematura. `SerieTemporalChart` (extraído no
+  checkpoint 11c) já cobria o único caso real de duplicação de gráfico que existia.
+- **Rodado contra o banco/API/frontend reais**: verificado visualmente que a participação % não
+  quebra o layout das barras em nenhuma das 3 telas (ex.: JUVEVÊ - "(sem categoria) 52
+  (68,4%)"), e que os tooltips novos abrem com a fórmula certa. `npm run build`/`lint`/`tsc`
+  limpos, 180 testes Python passando (sem mudança de contagem - só frontend nesta etapa).
+
+**Fase de inteligência territorial (checkpoints 11a-11e) concluída.** As 4 experiências do
+prompt de referência (Radar, Perfil do Território, Investigação por Endereço, Comparação)
+estão implementadas e rodando localmente; toda métrica em tela tem fórmula documentada em
+`/metodologia` e a maioria tem `MethodologyTooltip` inline. Deploy (checkpoints 6b/7d) segue
+adiado por decisão do dono, como documentado desde a fase 1 - tudo roda local
+(`uvicorn`/`next dev`).
+
 ## Notas operacionais
 
 - Ambiente Python único disponível na máquina é 3.14 (via `py -0p`); todas as dependências

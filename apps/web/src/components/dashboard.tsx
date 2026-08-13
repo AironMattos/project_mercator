@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { DateRange } from "react-day-picker";
 
@@ -10,8 +11,8 @@ import { ChoroplethMap } from "@/components/choropleth-map";
 import { DetailPanel } from "@/components/detail-panel";
 import { Headline } from "@/components/headline";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { RadarRankingPanel } from "@/components/radar-ranking-panel";
 import { RadiusSearchPanel } from "@/components/radius-search-panel";
-import { RankingList } from "@/components/ranking-list";
 import { SaldoLegend } from "@/components/saldo-legend";
 import {
   Select,
@@ -191,18 +192,32 @@ export function Dashboard() {
             Curitiba — abertura e fechamento de estabelecimentos por bairro e categoria
           </p>
         </div>
-        <Tabs
-          value={aba}
-          onValueChange={(valor) => {
-            if (valor) setAba(valor as Aba);
-          }}
-        >
-          <TabsList>
-            <TabsTrigger value="mapa">Mapa</TabsTrigger>
-            <TabsTrigger value="ranking">Ranking de crescimento</TabsTrigger>
-            <TabsTrigger value="busca-raio">Busca por raio</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex items-center gap-4">
+          <Tabs
+            value={aba}
+            onValueChange={(valor) => {
+              if (valor) setAba(valor as Aba);
+            }}
+          >
+            <TabsList>
+              <TabsTrigger value="mapa">Mapa</TabsTrigger>
+              <TabsTrigger value="ranking">Ranking de crescimento</TabsTrigger>
+              <TabsTrigger value="busca-raio">Busca por raio</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Link
+            href="/comparacao"
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Comparar bairros
+          </Link>
+          <Link
+            href="/metodologia"
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Metodologia
+          </Link>
+        </div>
       </header>
 
       <div className="flex flex-wrap items-center gap-3 border-b px-6 py-3">
@@ -360,9 +375,10 @@ export function Dashboard() {
         )}
 
         {base.status === "pronto" && aba === "ranking" && (
-          <RankingList
+          <RadarRankingPanel
             categoriaId={categoriaFiltro}
             onSelecionarTerritorio={selecionarTerritorioComNome}
+            onSelecionarCategoria={(catId) => setCategoriaId(catId)}
           />
         )}
 

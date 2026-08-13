@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from analytics.features.servico_indicadores import (
@@ -20,29 +20,37 @@ from infrastructure.database.repositories.territorio_repository import (
 
 from dependencies import get_db
 from routers.metricas import montar_serie_metricas
-from schemas import BairroResumoOut, IndicadorOut, QuebraCategoriaOut
+from schemas import BairroResumoOut, ComparacaoOut, IndicadorOut, QuebraCategoriaOut
 
 router = APIRouter()
 
+MIN_BAIRROS_COMPARACAO = 2
+MAX_BAIRROS_COMPARACAO = 4
 
-@router.get("/bairros/{territorio_id}/resumo", response_model=BairroResumoOut)
-def bairro_resumo(
+
+def _montar_resumo_bairro(
+    session: Session,
     territorio_id: str,
-    categoria_id: str | None = None,
-    periodo: date | None = None,
-    data_inicio: date | None = None,
-    data_fim: date | None = None,
-    session: Session = Depends(get_db),
-) -> BairroResumoOut:
-    """Perfil completo de um bairro: os indicadores de aberturas/saldo
-    (com baseline e tendência quando confiáveis), a posição no ranking de
+    *,
+    categoria_id: str | None,
+    periodo: date | None,
+    data_inicio: date | None,
+    data_fim: date | None,
+    nomes: dict[str, str],
+) -> BairroResumoOut | None:
+    """Perfil completo de um bairro: os indicadores de aberturas/saldo (com
+    baseline e tendência quando confiáveis), a posição no ranking de
     crescimento, a quebra por categoria do período, e a série temporal já
     exposta por /metricas/comercio (reaproveitada, não recalculada aqui).
+
+    Fatorada de `bairro_resumo` (checkpoint 11c) para ser reaproveitada por
+    GET /bairros/comparar sem duplicar a lógica - `nomes` é passado de fora
+    porque quem compara vários bairros já carregou o mapa completo uma
+    única vez, evitar recarregar por bairro.
     """
-    nomes = nomes_por_territorio_id(session)
     nome = nomes.get(territorio_id)
     if nome is None:
-        raise HTTPException(status_code=404, detail="território não encontrado")
+        return None
 
     mes_referencia = periodo or periodo_padrao_aberturas(session)
 
@@ -108,3 +116,71 @@ def bairro_resumo(
         ],
         serie_temporal=serie_temporal,
     )
+
+
+@router.get("/bairros/{territorio_id}/resumo", response_model=BairroResumoOut)
+def bairro_resumo(
+    territorio_id: str,
+    categoria_id: str | None = None,
+    periodo: date | None = None,
+    data_inicio: date | None = None,
+    data_fim: date | None = None,
+    session: Session = Depends(get_db),
+) -> BairroResumoOut:
+    nomes = nomes_por_territorio_id(session)
+    resumo = _montar_resumo_bairro(
+        session,
+        territorio_id,
+        categoria_id=categoria_id,
+        periodo=periodo,
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+        nomes=nomes,
+    )
+    if resumo is None:
+        raise HTTPException(status_code=404, detail="território não encontrado")
+    return resumo
+
+
+@router.get("/bairros/comparar", response_model=ComparacaoOut)
+def bairros_comparar(
+    ids: str = Query(..., description="territorio_id separados por vírgula, 2 a 4 bairros"),
+    categoria_id: str | None = None,
+    periodo: date | None = None,
+    data_inicio: date | None = None,
+    data_fim: date | None = None,
+    session: Session = Depends(get_db),
+) -> ComparacaoOut:
+    """Perfil completo (mesmo formato de /bairros/{id}/resumo) de 2 a 4
+    bairros de uma vez - checkpoint 11c, "COMPARAÇÃO" no prompt de
+    referência. Um único endpoint em vez de N chamadas sequenciais do
+    frontend (evita N waterfalls); nenhuma lógica de comparação nova aqui -
+    cada item é exatamente o que /bairros/{id}/resumo já calcula, lado a
+    lado, sem nota nem ranking agregado entre eles (o prompt é explícito:
+    "não criar uma nota geral para determinar qual bairro é melhor").
+    """
+    territorio_ids = [t.strip() for t in ids.split(",") if t.strip()]
+    if not (MIN_BAIRROS_COMPARACAO <= len(territorio_ids) <= MAX_BAIRROS_COMPARACAO):
+        raise HTTPException(
+            status_code=422,
+            detail=f"informe entre {MIN_BAIRROS_COMPARACAO} e {MAX_BAIRROS_COMPARACAO} bairros",
+        )
+
+    nomes = nomes_por_territorio_id(session)
+    invalidos = [t for t in territorio_ids if t not in nomes]
+    if invalidos:
+        raise HTTPException(status_code=404, detail=f"território(s) não encontrado(s): {', '.join(invalidos)}")
+
+    itens = [
+        _montar_resumo_bairro(
+            session,
+            territorio_id,
+            categoria_id=categoria_id,
+            periodo=periodo,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+            nomes=nomes,
+        )
+        for territorio_id in territorio_ids
+    ]
+    return ComparacaoOut(itens=[i for i in itens if i is not None])

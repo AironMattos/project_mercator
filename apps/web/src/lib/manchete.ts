@@ -1,4 +1,11 @@
-import type { BairroResumo, BuscaRaio, Categoria, MetricaComercio, RankingItem } from "@/lib/api";
+import type {
+  BairroResumo,
+  BuscaRaio,
+  Categoria,
+  MetricaComercio,
+  RankingCategoriaItem,
+  RankingItem,
+} from "@/lib/api";
 import { formatarValorCompacto } from "@/lib/indicadores";
 
 /**
@@ -45,16 +52,50 @@ export function mancheteMapa(
 }
 
 // Ranking: usa só campos que a API já devolve por item (variacao_pct,
-// tendencia) - sem fetch adicional.
-export function mancheteRanking(itens: RankingItem[]): string {
+// tendencia) - sem fetch adicional. `ordem` (checkpoint 11b) distingue a
+// frase de "maiores crescimentos" da de "maiores retrações" - nunca uma
+// lista só, nunca a mesma frase pras duas.
+export function mancheteRanking(itens: RankingItem[], ordem: "desc" | "asc" = "desc"): string {
   if (itens.length === 0) {
-    return "Nenhum bairro elegível para o ranking de crescimento neste filtro ainda.";
+    return ordem === "asc"
+      ? "Nenhum bairro elegível para o ranking de retração neste filtro ainda."
+      : "Nenhum bairro elegível para o ranking de crescimento neste filtro ainda.";
   }
 
   const lider = itens[0];
   const pct = formatarPct(lider.variacaoPct);
-  const partes = [`${lider.nome} lidera o ranking de crescimento comercial`];
-  if (pct) partes.push(`com ${pct} acima da média histórica`);
+  const partes = [
+    ordem === "asc"
+      ? `${lider.nome} lidera a retração de comércio`
+      : `${lider.nome} lidera o crescimento de comércio`,
+  ];
+  if (pct) partes.push(`com ${pct} frente à média histórica`);
+  if (lider.tendencia === "acelerando" || lider.tendencia === "desacelerando") {
+    partes.push(lider.tendencia);
+  }
+  return partes.join(", ") + ".";
+}
+
+// Ranking por categoria (checkpoint 11b) - mesmo padrão do ranking por
+// bairro, sem sparkline (a API de categoria não devolve serie).
+export function mancheteRankingCategorias(
+  itens: RankingCategoriaItem[],
+  ordem: "desc" | "asc" = "desc",
+): string {
+  if (itens.length === 0) {
+    return ordem === "asc"
+      ? "Nenhuma categoria elegível para o ranking de retração neste filtro ainda."
+      : "Nenhuma categoria elegível para o ranking de crescimento neste filtro ainda.";
+  }
+
+  const lider = itens[0];
+  const pct = formatarPct(lider.variacaoPct);
+  const partes = [
+    ordem === "asc"
+      ? `${lider.nome} é a categoria com maior retração`
+      : `${lider.nome} é a categoria que mais cresce`,
+  ];
+  if (pct) partes.push(`${pct} frente à média histórica`);
   if (lider.tendencia === "acelerando" || lider.tendencia === "desacelerando") {
     partes.push(lider.tendencia);
   }

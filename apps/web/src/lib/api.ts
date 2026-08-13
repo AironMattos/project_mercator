@@ -54,10 +54,13 @@ export type RankingItem = {
   serie: PontoSerie[];
 };
 
+export type Ordem = "desc" | "asc";
+
 export type RankingFiltros = {
   categoriaId?: string;
   periodo?: string;
   limite?: number;
+  ordem?: Ordem;
 };
 
 export type Indicador = {
@@ -193,6 +196,7 @@ export function getRanking(filtros: RankingFiltros = {}): Promise<Ranking> {
     categoria_id: filtros.categoriaId,
     periodo: filtros.periodo,
     limite: filtros.limite !== undefined ? String(filtros.limite) : undefined,
+    ordem: filtros.ordem,
   }).then((resposta) => ({
     itens: resposta.itens.map((i) => ({
       territorioId: i.territorio_id,
@@ -206,6 +210,113 @@ export function getRanking(filtros: RankingFiltros = {}): Promise<Ranking> {
       serie: i.serie,
     })),
     abaixoDoPisoVolume: resposta.abaixo_do_piso_volume,
+  }));
+}
+
+// Ranking por categoria (checkpoint 11b) - mesma mecânica do ranking por
+// bairro, agrupado por categoria; cidade inteira por padrão, ou um bairro
+// específico via territorioId (usado no perfil de bairro).
+export type RankingCategoriaItem = {
+  categoriaId: string;
+  nome: string;
+  valorAtual: number;
+  baseline: number | null;
+  variacaoPct: number | null;
+  tendencia: "acelerando" | "desacelerando" | "estavel" | null;
+  posicao: number;
+  total: number;
+};
+
+export type RankingCategorias = {
+  itens: RankingCategoriaItem[];
+  abaixoDoPisoVolume: number;
+};
+
+type RankingCategoriaItemApi = {
+  categoria_id: string;
+  nome: string;
+  valor_atual: number;
+  baseline: number | null;
+  variacao_pct: number | null;
+  tendencia: RankingCategoriaItem["tendencia"];
+  posicao: number;
+  total: number;
+};
+
+type RankingCategoriasApi = {
+  itens: RankingCategoriaItemApi[];
+  abaixo_do_piso_volume: number;
+};
+
+export type RankingCategoriasFiltros = {
+  territorioId?: string;
+  periodo?: string;
+  limite?: number;
+  ordem?: Ordem;
+};
+
+export function getRankingCategorias(
+  filtros: RankingCategoriasFiltros = {},
+): Promise<RankingCategorias> {
+  return fetchJson<RankingCategoriasApi>("/ranking/categorias", {
+    territorio_id: filtros.territorioId,
+    periodo: filtros.periodo,
+    limite: filtros.limite !== undefined ? String(filtros.limite) : undefined,
+    ordem: filtros.ordem,
+  }).then((resposta) => ({
+    itens: resposta.itens.map((i) => ({
+      categoriaId: i.categoria_id,
+      nome: i.nome,
+      valorAtual: i.valor_atual,
+      baseline: i.baseline,
+      variacaoPct: i.variacao_pct,
+      tendencia: i.tendencia,
+      posicao: i.posicao,
+      total: i.total,
+    })),
+    abaixoDoPisoVolume: resposta.abaixo_do_piso_volume,
+  }));
+}
+
+// Sinais (checkpoint 11b) - destaques com critério explícito e fixo (ver
+// GET /sinais no backend), nunca um score.
+export type Sinal = {
+  territorioId: string;
+  nome: string;
+  descricao: string;
+  mesesConsecutivos: number;
+};
+
+export type Sinais = {
+  itens: Sinal[];
+  criterio: string;
+  periodoReferencia: string | null;
+  motivoIndisponivel: string | null;
+};
+
+type SinaisApi = {
+  itens: Array<{
+    territorio_id: string;
+    nome: string;
+    descricao: string;
+    meses_consecutivos: number;
+  }>;
+  criterio: string;
+  periodo_referencia: string | null;
+  motivo_indisponivel: string | null;
+};
+
+export function getSinais(): Promise<Sinais> {
+  return fetchJson<SinaisApi>("/sinais").then((r) => ({
+    itens: r.itens.map((i) => ({
+      territorioId: i.territorio_id,
+      nome: i.nome,
+      descricao: i.descricao,
+      mesesConsecutivos: i.meses_consecutivos,
+    })),
+    criterio: r.criterio,
+    periodoReferencia: r.periodo_referencia,
+    motivoIndisponivel: r.motivo_indisponivel,
   }));
 }
 
@@ -283,6 +394,57 @@ export function getBairroResumo(
   }));
 }
 
+// Comparação de territórios (checkpoint 11c) - mesmo formato de
+// BairroResumo, um item por bairro selecionado, lado a lado.
+export type ComparacaoFiltros = {
+  categoriaId?: string;
+  periodo?: string;
+  dataInicio?: string;
+  dataFim?: string;
+};
+
+type ComparacaoApi = { itens: BairroResumoApi[] };
+
+export function getComparacao(
+  territorioIds: string[],
+  filtros: ComparacaoFiltros = {},
+): Promise<BairroResumo[]> {
+  return fetchJson<ComparacaoApi>("/bairros/comparar", {
+    ids: territorioIds.join(","),
+    categoria_id: filtros.categoriaId,
+    periodo: filtros.periodo,
+    data_inicio: filtros.dataInicio,
+    data_fim: filtros.dataFim,
+  }).then((r) =>
+    r.itens.map((item) => ({
+      territorioId: item.territorio_id,
+      nome: item.nome,
+      periodo: item.periodo,
+      aberturas: mapIndicador(item.aberturas),
+      saldo: mapIndicador(item.saldo),
+      posicaoRanking: item.posicao_ranking,
+      totalRanking: item.total_ranking,
+      quebraCategoria: item.quebra_categoria.map((c) => ({
+        categoriaId: c.categoria_id,
+        nome: c.nome,
+        contagem: c.contagem,
+      })),
+      serieTemporal: item.serie_temporal.map((l) => ({
+        territorio_id: l.territorio_id,
+        categoria_id: l.categoria_id,
+        mes: l.mes,
+        aberturas: l.aberturas,
+        desaparecimentos: l.desaparecimentos,
+        saldo: l.saldo,
+        baseline: l.baseline,
+        variacaoPct: l.variacao_pct,
+        tendencia: l.tendencia,
+        motivoIndisponivel: l.motivo_indisponivel,
+      })),
+    })),
+  );
+}
+
 export type EstabelecimentoRaio = {
   entidadeId: string;
   nome: string | null;
@@ -292,6 +454,14 @@ export type EstabelecimentoRaio = {
   distanciaM: number;
   confianca: "alta" | "media" | "baixa";
   ponto: { lat: number; lon: number };
+};
+
+export type PontoSerieRaio = { mes: string; aberturas: number; fechamentos: number };
+
+export type ComparacaoBairroRaio = {
+  territorioId: string;
+  nome: string;
+  aberturas: Indicador;
 };
 
 export type BuscaRaio = {
@@ -304,6 +474,15 @@ export type BuscaRaio = {
   // Visível, não escondido: quantos estavam no raio mas com confianca='baixa'
   // (não entram na contagem principal) - checkpoint 9, seção 5/6.
   excluidosBaixaConfianca: number;
+  // Investigação por endereço evoluída (checkpoint 11d).
+  densidadeKm2: number;
+  aberturas: number;
+  fechamentos: number;
+  saldo: number;
+  turnover: number | null;
+  quebraCategoria: QuebraCategoria[];
+  serieTemporal: PontoSerieRaio[];
+  comparacaoBairro: ComparacaoBairroRaio | null;
 };
 
 // Erro tipado pra distinguir "endereço não encontrado" (404) de "endereço
@@ -335,6 +514,14 @@ type BuscaRaioApi = {
     ponto: { lat: number; lon: number };
   }>;
   excluidos_baixa_confianca: number;
+  densidade_km2: number;
+  aberturas: number;
+  fechamentos: number;
+  saldo: number;
+  turnover: number | null;
+  quebra_categoria: Array<{ categoria_id: string | null; nome: string; contagem: number }>;
+  serie_temporal: Array<{ mes: string; aberturas: number; fechamentos: number }>;
+  comparacao_bairro: { territorio_id: string; nome: string; aberturas: IndicadorApi } | null;
 };
 
 export async function getBuscaRaio(
@@ -373,6 +560,24 @@ export async function getBuscaRaio(
       ponto: e.ponto,
     })),
     excluidosBaixaConfianca: d.excluidos_baixa_confianca,
+    densidadeKm2: d.densidade_km2,
+    aberturas: d.aberturas,
+    fechamentos: d.fechamentos,
+    saldo: d.saldo,
+    turnover: d.turnover,
+    quebraCategoria: d.quebra_categoria.map((c) => ({
+      categoriaId: c.categoria_id,
+      nome: c.nome,
+      contagem: c.contagem,
+    })),
+    serieTemporal: d.serie_temporal,
+    comparacaoBairro: d.comparacao_bairro
+      ? {
+          territorioId: d.comparacao_bairro.territorio_id,
+          nome: d.comparacao_bairro.nome,
+          aberturas: mapIndicador(d.comparacao_bairro.aberturas),
+        }
+      : null,
   };
 }
 
@@ -384,4 +589,44 @@ export function getCoberturaTemporal(): Promise<CoberturaTemporal> {
   return fetchJson<{ mes_inicio: string | null; mes_fim: string | null }>(
     "/metricas/cobertura",
   ).then((r) => ({ mesInicio: r.mes_inicio, mesFim: r.mes_fim }));
+}
+
+// Fatos objetivos sobre a base (checkpoint 11a) - nunca um "índice de
+// confiança" composto, ver GET /qualidade-dados no backend.
+export type QualidadeDados = {
+  totalEstabelecimentos: number;
+  geocodificadosAlta: number;
+  geocodificadosMedia: number;
+  geocodificadosBaixa: number;
+  naoGeocodificados: number;
+  pctLocalizacaoValida: number;
+  coberturaTemporal: CoberturaTemporal;
+  ultimaAtualizacao: string | null;
+};
+
+type QualidadeDadosApi = {
+  total_estabelecimentos: number;
+  geocodificados_alta: number;
+  geocodificados_media: number;
+  geocodificados_baixa: number;
+  nao_geocodificados: number;
+  pct_localizacao_valida: number;
+  cobertura_temporal: { mes_inicio: string | null; mes_fim: string | null };
+  ultima_atualizacao: string | null;
+};
+
+export function getQualidadeDados(): Promise<QualidadeDados> {
+  return fetchJson<QualidadeDadosApi>("/qualidade-dados").then((r) => ({
+    totalEstabelecimentos: r.total_estabelecimentos,
+    geocodificadosAlta: r.geocodificados_alta,
+    geocodificadosMedia: r.geocodificados_media,
+    geocodificadosBaixa: r.geocodificados_baixa,
+    naoGeocodificados: r.nao_geocodificados,
+    pctLocalizacaoValida: r.pct_localizacao_valida,
+    coberturaTemporal: {
+      mesInicio: r.cobertura_temporal.mes_inicio,
+      mesFim: r.cobertura_temporal.mes_fim,
+    },
+    ultimaAtualizacao: r.ultima_atualizacao,
+  }));
 }
