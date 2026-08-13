@@ -68,6 +68,16 @@ class RankingItemOut(BaseModel):
     serie: list[PontoSerieOut] = []
 
 
+class RankingOut(BaseModel):
+    itens: list[RankingItemOut]
+    # Bairros com variacao_pct calculável mas baseline abaixo do piso
+    # mínimo de volume (checkpoint 10d) - não competem pelas primeiras
+    # posições (ruído estatístico de baixo volume), mas a contagem fica
+    # visível aqui, não escondida - mesmo padrão de
+    # excluidos_baixa_confianca em busca-raio.
+    abaixo_do_piso_volume: int
+
+
 class QuebraCategoriaOut(BaseModel):
     categoria_id: str | None
     nome: str

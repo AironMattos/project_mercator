@@ -4,11 +4,13 @@ import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Headline } from "@/components/headline";
 import { Input } from "@/components/ui/input";
 import { RadiusMap } from "@/components/radius-map";
 import { RadiusResultsList } from "@/components/radius-results-list";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BuscaRaioError, getBuscaRaio, type BuscaRaio, type Categoria } from "@/lib/api";
+import { formatarRaioM, mancheteBuscaRaio } from "@/lib/manchete";
 import { cn } from "@/lib/utils";
 
 type RadiusSearchPanelProps = {
@@ -121,13 +123,15 @@ export function RadiusSearchPanel({ categoriaId, nomeCategoria, categorias }: Ra
 
       {estado.status === "pronto" && (
         <div className="flex flex-1 flex-col gap-3">
+          {estado.resultado.total > 0 && (
+            <Headline>{mancheteBuscaRaio(estado.resultado, categorias, nomeCategoria)}</Headline>
+          )}
+
           <div className="flex flex-wrap items-end gap-3">
             <div className="rounded-md border p-3">
               <p className="text-xs text-muted-foreground">
                 Estabelecimentos{nomeCategoria ? ` de ${nomeCategoria}` : ""} num raio de{" "}
-                {estado.resultado.raioM >= 1000
-                  ? `${estado.resultado.raioM / 1000}km`
-                  : `${estado.resultado.raioM}m`}
+                {formatarRaioM(estado.resultado.raioM)}
               </p>
               <p
                 className="mt-1 text-2xl font-semibold"
@@ -151,7 +155,8 @@ export function RadiusSearchPanel({ categoriaId, nomeCategoria, categorias }: Ra
               <AlertTitle>Nenhum estabelecimento encontrado</AlertTitle>
               <AlertDescription>
                 Não há estabelecimentos{nomeCategoria ? ` de ${nomeCategoria}` : ""} num raio de{" "}
-                {estado.resultado.raioM}m de &ldquo;{estado.resultado.enderecoBuscado}&rdquo;.
+                {formatarRaioM(estado.resultado.raioM)} de &ldquo;{estado.resultado.enderecoBuscado}
+                &rdquo;.
                 {estado.resultado.excluidosBaixaConfianca > 0 &&
                   " Há endereços próximos com localização pouco confiável, não contados acima."}
               </AlertDescription>

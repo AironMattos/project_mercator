@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { ChoroplethMap } from "@/components/choropleth-map";
 import { DetailPanel } from "@/components/detail-panel";
+import { Headline } from "@/components/headline";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RadiusSearchPanel } from "@/components/radius-search-panel";
 import { RankingList } from "@/components/ranking-list";
@@ -31,6 +32,7 @@ import {
   type GeoJsonFeatureCollection,
   type MetricaComercio,
 } from "@/lib/api";
+import { mancheteMapa } from "@/lib/manchete";
 import { formatarMesAno, intervaloUltimosMeses, PRESETS_PERIODO } from "@/lib/periodo";
 
 type Aba = "mapa" | "ranking" | "busca-raio";
@@ -159,6 +161,19 @@ export function Dashboard() {
     }
   }
 
+  const nomesPorTerritorio = useMemo(() => {
+    if (base.status !== "pronto") return new Map<string, string>();
+    return new Map(base.territorios.features.map((f) => [f.properties.territorio_id, f.properties.nome]));
+  }, [base]);
+
+  const nomesPorCategoria = useMemo(() => {
+    const mapa = new Map<string, string>([[TODAS_CATEGORIAS, "Todas as categorias"]]);
+    if (base.status === "pronto") {
+      for (const categoria of base.categorias) mapa.set(categoria.categoria_id, categoria.nome);
+    }
+    return mapa;
+  }, [base]);
+
   // Clique numa linha do ranking já vem com o nome (a API devolve) - não
   // precisa procurar no GeoJSON como o clique no mapa. Os dois caminhos
   // levam ao mesmo DetailPanel, só a origem do nome muda.
@@ -170,9 +185,10 @@ export function Dashboard() {
     <div className="flex h-screen flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b px-6 py-4">
         <div>
-          <h1 className="text-lg font-semibold">Radar de Comércio — Curitiba</h1>
+          <p className="text-xs font-semibold tracking-wider text-primary uppercase">Mercator</p>
+          <h1 className="font-heading text-2xl leading-tight font-semibold">Radar de Comércio</h1>
           <p className="text-sm text-muted-foreground">
-            Abertura e fechamento de estabelecimentos por bairro e categoria
+            Curitiba — abertura e fechamento de estabelecimentos por bairro e categoria
           </p>
         </div>
         <Tabs
@@ -198,7 +214,13 @@ export function Dashboard() {
           disabled={base.status !== "pronto"}
         >
           <SelectTrigger className="w-64">
-            <SelectValue placeholder="Todas as categorias" />
+            {/* Checkpoint 10d: o campo fechado mostrava o categoria_id cru
+              (ex.: "imobiliario") em vez do nome formatado que a lista
+              aberta já usa - Select.Value do Base UI exibe o value literal
+              por padrão, a menos que receba a função de formatação. */}
+            <SelectValue placeholder="Todas as categorias">
+              {(valor: string | null) => (valor ? (nomesPorCategoria.get(valor) ?? valor) : "Todas as categorias")}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={TODAS_CATEGORIAS}>Todas as categorias</SelectItem>
@@ -299,6 +321,14 @@ export function Dashboard() {
 
         {base.status === "pronto" && aba === "mapa" && base.territorios.features.length > 0 && (
           <div className="flex flex-1 flex-col gap-3">
+            {metricas.status === "carregando" && metricasAtuais.length === 0 ? (
+              <Skeleton className="h-9 w-3/4" />
+            ) : (
+              metricas.status !== "erro" && (
+                <Headline>{mancheteMapa(metricasAtuais, nomesPorTerritorio)}</Headline>
+              )
+            )}
+
             {metricas.status === "erro" && (
               <Alert variant="destructive">
                 <AlertTitle>Não foi possível carregar a métrica</AlertTitle>

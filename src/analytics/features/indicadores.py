@@ -19,6 +19,15 @@ MINIMO_MESES_BASELINE = 3
 MINIMO_MESES_POR_JANELA_TENDENCIA = 2
 LIMIAR_TENDENCIA_PCT = 0.10
 
+# Piso mínimo de volume (checkpoint 10d - passe de polimento da identidade
+# editorial): baseline abaixo disso não compete pelas primeiras posições do
+# ranking - variação percentual sobre 2-5 aberturas é ruído estatístico, não
+# crescimento de verdade. 10, não 15, pra não excluir o caso legítimo já
+# coberto em teste (bairro pequeno com baseline=10 crescendo de verdade
+# ainda deve aparecer bem posicionado - ver
+# test_ranking_ordena_por_variacao_pct_nao_por_valor_absoluto).
+BASELINE_MINIMO_RANKING = 10
+
 ACELERANDO = "acelerando"
 DESACELERANDO = "desacelerando"
 ESTAVEL = "estavel"
@@ -159,18 +168,33 @@ def calcular_tendencia(
     return Tendencia(classificacao=classificacao, variacao_pct=variacao_pct, motivo_indisponivel=None)
 
 
-def calcular_ranking(itens: Sequence[ItemComBaseline]) -> list[ItemRanking]:
+def calcular_ranking(
+    itens: Sequence[ItemComBaseline], *, baseline_minimo: float = BASELINE_MINIMO_RANKING
+) -> list[ItemRanking]:
     """Ordena por variacao_pct desc - crescimento relativo, não volume
     absoluto (um bairro pequeno acelerando aparece à frente de um grande
     estável, de propósito). Itens sem variacao_pct (baseline indisponível)
     não são elegíveis - não entram na lista nem contam pro `total`.
+
+    Piso mínimo de volume (checkpoint 10d): itens com baseline abaixo de
+    `baseline_minimo` também ficam de fora do ranking principal, mesmo
+    tendo variacao_pct - variação percentual sobre um baseline de 2-5
+    aberturas é ruído estatístico, não sinal de crescimento real. Quem
+    chama esta função e precisa saber quantos ficaram de fora por esse
+    motivo (pra não escondê-los silenciosamente) deve comparar contra a
+    lista de entrada - ver montar_ranking_aberturas.
 
     Desempate por territorio_id (determinístico, não afeta o significado
     do ranking - só evita ordem instável entre execuções quando dois
     bairros empatam exatamente na variação).
     """
     elegiveis = sorted(
-        (item for item in itens if item.variacao_pct is not None),
+        (
+            item
+            for item in itens
+            if item.variacao_pct is not None
+            and (item.baseline is None or item.baseline >= baseline_minimo)
+        ),
         key=lambda item: (-item.variacao_pct, item.territorio_id or ""),
     )
     total = len(elegiveis)

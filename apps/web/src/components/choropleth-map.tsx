@@ -13,6 +13,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { GeoJsonFeatureCollection, MetricaComercio } from "@/lib/api";
 import { COR_SUPERFICIE, LARGURA_ANEL_SUPERFICIE, MAP_STYLE_URL } from "@/lib/map-style";
 import { expressaoCorPorSaldo, NEUTRO_SALDO_ZERO } from "@/lib/palette";
@@ -88,6 +89,7 @@ export function ChoroplethMap({
   const popupRef = useRef<Popup | null>(null);
   const onSelecionarRef = useRef(onSelecionarTerritorio);
   const [erro, setErro] = useState<string | null>(null);
+  const [carregando, setCarregando] = useState(true);
 
   useEffect(() => {
     onSelecionarRef.current = onSelecionarTerritorio;
@@ -179,9 +181,21 @@ export function ChoroplethMap({
           onSelecionarRef.current?.(territorioId);
         }
       });
+
+      setCarregando(false);
     });
 
+    // Corrige o mapa em branco até interação (checkpoint 10d): o MapLibre é
+    // inicializado antes do container ter a dimensão final calculada pelo
+    // layout (canvas nasce 0x0 ou com um tamanho stale), e sem um resize()
+    // explícito ele nunca repinta sozinho - só depois que o usuário mexe no
+    // mapa (o que força um reflow). Um ResizeObserver cobre tanto essa
+    // primeira estabilização do layout quanto resizes de verdade depois.
+    const resizeObserver = new ResizeObserver(() => map.resize());
+    resizeObserver.observe(containerRef.current);
+
     return () => {
+      resizeObserver.disconnect();
       popupRef.current?.remove();
       map.remove();
       mapRef.current = null;
@@ -222,6 +236,11 @@ export function ChoroplethMap({
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
+      {carregando && !erro && (
+        <div className="absolute inset-0" aria-hidden>
+          <Skeleton className="h-full w-full rounded-none" />
+        </div>
+      )}
       {erro && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/90 p-6">
           <Alert variant="destructive" className="max-w-md">

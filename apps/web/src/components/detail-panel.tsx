@@ -13,6 +13,7 @@ import {
 } from "recharts";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Headline } from "@/components/headline";
 import { QuebraCategoriaBars } from "@/components/quebra-categoria";
 import {
   Sheet,
@@ -24,6 +25,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatTile } from "@/components/stat-tile";
 import { getBairroResumo, type BairroResumo } from "@/lib/api";
+import { mancheteDetalheBairro } from "@/lib/manchete";
 
 type TerritorioSelecionado = { id: string; nome: string };
 
@@ -115,13 +117,15 @@ export function DetailPanel({
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
         <SheetHeader>
           <SheetTitle>{territorio?.nome ?? ""}</SheetTitle>
+          {estado.status === "pronto" ? (
+            <Headline size="md" className="pt-1">
+              {mancheteDetalheBairro(estado.resumo)}
+            </Headline>
+          ) : estado.status === "carregando" ? (
+            <Skeleton className="mt-1 h-7 w-full" />
+          ) : null}
           <SheetDescription>
-            {estado.status === "pronto"
-              ? estado.resumo.posicaoRanking !== null
-                ? `#${estado.resumo.posicaoRanking} de ${estado.resumo.totalRanking} em crescimento de comércio`
-                : "sem posição no ranking de crescimento (histórico insuficiente)"
-              : "carregando posição no ranking…"}
-            {categoriaId ? " · categoria filtrada" : " · todas as categorias"}
+            {categoriaId ? "categoria filtrada" : "todas as categorias"}
           </SheetDescription>
         </SheetHeader>
 

@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Headline } from "@/components/headline";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkline } from "@/components/sparkline";
 import { getRanking, type RankingItem } from "@/lib/api";
 import { corDelta, formatarDeltaPct, formatarValorCompacto } from "@/lib/indicadores";
+import { mancheteRanking } from "@/lib/manchete";
 
 type Props = {
   categoriaId?: string;
@@ -16,7 +18,7 @@ type Props = {
 type Estado =
   | { status: "carregando" }
   | { status: "erro"; mensagem: string }
-  | { status: "pronto"; itens: RankingItem[] };
+  | { status: "pronto"; itens: RankingItem[]; abaixoDoPisoVolume: number };
 
 const LIMITE_RANKING = 20;
 
@@ -31,8 +33,14 @@ export function RankingList({ categoriaId, onSelecionarTerritorio }: Props) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- indicador de carregando pro refetch ao trocar categoria, não há como derivar isso do render.
     setEstado({ status: "carregando" });
     getRanking({ categoriaId, limite: LIMITE_RANKING })
-      .then((itens) => {
-        if (!cancelado) setEstado({ status: "pronto", itens });
+      .then((ranking) => {
+        if (!cancelado) {
+          setEstado({
+            status: "pronto",
+            itens: ranking.itens,
+            abaixoDoPisoVolume: ranking.abaixoDoPisoVolume,
+          });
+        }
       })
       .catch((erro: unknown) => {
         if (!cancelado) {
@@ -49,10 +57,13 @@ export function RankingList({ categoriaId, onSelecionarTerritorio }: Props) {
 
   if (estado.status === "carregando") {
     return (
-      <div className="space-y-2" role="status" aria-label="Carregando">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-14 w-full" />
-        ))}
+      <div className="space-y-3" role="status" aria-label="Carregando">
+        <Skeleton className="h-9 w-3/4" />
+        <div className="space-y-2">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="h-14 w-full" />
+          ))}
+        </div>
       </div>
     );
   }
@@ -71,19 +82,25 @@ export function RankingList({ categoriaId, onSelecionarTerritorio }: Props) {
       <Alert>
         <AlertTitle>Nenhum bairro elegível</AlertTitle>
         <AlertDescription>
-          Não há histórico suficiente pra calcular crescimento nesse filtro ainda.
+          {estado.abaixoDoPisoVolume > 0
+            ? `${estado.abaixoDoPisoVolume} bairro${estado.abaixoDoPisoVolume > 1 ? "s tiveram" : " teve"} crescimento calculável nesse filtro, mas com volume baixo demais (abaixo do piso mínimo) pra competir no ranking principal.`
+            : "Não há histórico suficiente pra calcular crescimento nesse filtro ainda."}
         </AlertDescription>
       </Alert>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto rounded-md border">
-      <p className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-        bairros ordenados por crescimento de aberturas frente ao baseline dos últimos 24
-        meses — {estado.itens[0].total} elegíveis
-      </p>
-      <ol className="divide-y">
+    <div className="flex flex-1 flex-col gap-3">
+      <Headline>{mancheteRanking(estado.itens)}</Headline>
+      <div className="flex-1 overflow-y-auto rounded-md border">
+        <p className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+          bairros ordenados por crescimento de aberturas frente ao baseline dos últimos 24
+          meses — {estado.itens[0].total} elegíveis
+          {estado.abaixoDoPisoVolume > 0 &&
+            ` · ${estado.abaixoDoPisoVolume} abaixo do piso mínimo de volume, não exibidos`}
+        </p>
+        <ol className="divide-y">
         {estado.itens.map((item) => (
           <li key={item.territorioId}>
             <button
@@ -117,7 +134,8 @@ export function RankingList({ categoriaId, onSelecionarTerritorio }: Props) {
             </button>
           </li>
         ))}
-      </ol>
+        </ol>
+      </div>
     </div>
   );
 }

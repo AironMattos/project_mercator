@@ -18,6 +18,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from analytics.features.indicadores import (
+    BASELINE_MINIMO_RANKING,
     Baseline,
     ItemComBaseline,
     ItemRanking,
@@ -202,10 +203,13 @@ def montar_ranking_aberturas(
     categoria_id: str | None,
     mes_referencia: date,
     limite: int | None = None,
-) -> tuple[list[ItemRanking], dict[str, list[PontoMensal]]]:
-    """Devolve o ranking e, junto, os últimos MESES_SPARKLINE pontos da
-    série de cada bairro elegível - o formato de resposta pedido no
-    prompt de referência ({territorio_id, nome, valor_atual, baseline,
+) -> tuple[list[ItemRanking], dict[str, list[PontoMensal]], int]:
+    """Devolve o ranking, os últimos MESES_SPARKLINE pontos da série de
+    cada bairro elegível, e a contagem de bairros abaixo do piso mínimo de
+    volume (checkpoint 10d - excluídos do ranking principal, mas visíveis
+    aqui, não escondidos silenciosamente, mesmo padrão de
+    excluidos_baixa_confianca em busca-raio). O formato de resposta pedido
+    no prompt de referência ({territorio_id, nome, valor_atual, baseline,
     variacao_pct, tendencia, posicao, total}) não incluía uma série pro
     sparkline do checkpoint 8c/3.1, então estendi a resposta da API com um
     campo `serie` a mais (ver resumo do checkpoint 8c) - devolver a série
@@ -230,6 +234,14 @@ def montar_ranking_aberturas(
             )
         )
 
+    abaixo_do_piso = sum(
+        1
+        for item in itens
+        if item.variacao_pct is not None
+        and item.baseline is not None
+        and item.baseline < BASELINE_MINIMO_RANKING
+    )
+
     ranking = calcular_ranking(itens)
     if limite is not None:
         ranking = ranking[:limite]
@@ -239,7 +251,7 @@ def montar_ranking_aberturas(
         for item in ranking
         if item.territorio_id in series
     }
-    return ranking, sparklines
+    return ranking, sparklines, abaixo_do_piso
 
 
 def quebra_categoria_bairro(

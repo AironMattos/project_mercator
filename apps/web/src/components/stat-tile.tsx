@@ -36,6 +36,27 @@ export function StatTile({
 }: StatTileProps) {
   const semBaseline = baseline === null;
 
+  // Checkpoint 10d: quando motivoIndisponivel está presente, o número em
+  // destaque (text-2xl) ao lado do aviso "em construção" contradizia o
+  // próprio aviso - o valor parcial passa a vir em peso visual claramente
+  // secundário, e o texto de aviso é que fica proeminente.
+  if (semBaseline) {
+    return (
+      <div className="flex-1 rounded-md border p-3">
+        <p className="text-xs text-muted-foreground">{rotulo}</p>
+        <p className="mt-1 text-sm font-medium text-muted-foreground">
+          {mensagemConstrucao ?? motivoIndisponivelLegivel(motivoIndisponivel)}
+        </p>
+        <p
+          className="mt-1 text-xs text-muted-foreground"
+          style={{ fontVariantNumeric: "proportional-nums" }}
+        >
+          valor parcial: {formatarValorCompacto(valorAtual)}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 rounded-md border p-3">
       <p className="text-xs text-muted-foreground">{rotulo}</p>
@@ -45,23 +66,17 @@ export function StatTile({
       >
         {formatarValorCompacto(valorAtual)}
       </p>
-      {semBaseline ? (
-        <p className="mt-1 text-xs text-muted-foreground">
-          {mensagemConstrucao ?? motivoIndisponivelLegivel(motivoIndisponivel)}
-        </p>
-      ) : (
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-          {variacaoPct !== null ? (
-            <span className="font-medium" style={{ color: corDelta(variacaoPct, cimaEBom) }}>
-              {formatarDeltaPct(variacaoPct)}
-            </span>
-          ) : (
-            <span>{motivoIndisponivelLegivel(motivoIndisponivel)}</span>
-          )}
-          <span>vs. baseline {formatarValorCompacto(baseline)}</span>
-          {tendencia && <span>· {rotuloTendencia(tendencia)}</span>}
-        </div>
-      )}
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+        {variacaoPct !== null ? (
+          <span className="font-medium" style={{ color: corDelta(variacaoPct, cimaEBom) }}>
+            {formatarDeltaPct(variacaoPct)}
+          </span>
+        ) : (
+          <span>{motivoIndisponivelLegivel(motivoIndisponivel)}</span>
+        )}
+        <span>vs. baseline {formatarValorCompacto(baseline)}</span>
+        {tendencia && <span>· {rotuloTendencia(tendencia)}</span>}
+      </div>
     </div>
   );
 }

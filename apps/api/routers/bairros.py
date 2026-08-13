@@ -55,7 +55,7 @@ def bairro_resumo(
 
     # Posição no ranking - mesmo filtro de categoria, sem limite (precisa
     # da lista inteira pra achar a posição deste bairro específico nela).
-    ranking_completo, _sparklines = montar_ranking_aberturas(
+    ranking_completo, _sparklines, _abaixo_do_piso = montar_ranking_aberturas(
         session, categoria_id=categoria_id, mes_referencia=mes_referencia
     )
     item_ranking = next((r for r in ranking_completo if r.territorio_id == territorio_id), None)

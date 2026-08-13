@@ -14,6 +14,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { BuscaRaio } from "@/lib/api";
 import { COR_SUPERFICIE, LARGURA_ANEL_SUPERFICIE, MAP_STYLE_URL } from "@/lib/map-style";
 import { AZUL_DESTAQUE } from "@/lib/palette";
@@ -155,7 +156,14 @@ export function RadiusMap({
       setCarregado(true);
     });
 
+    // Mesma correção do choropleth-map (checkpoint 10d): força resize()
+    // quando o container atinge sua dimensão final de layout, em vez de só
+    // repintar depois de uma interação manual do usuário.
+    const resizeObserver = new ResizeObserver(() => map.resize());
+    resizeObserver.observe(containerRef.current);
+
     return () => {
+      resizeObserver.disconnect();
       popupRef.current?.remove();
       map.remove();
       mapRef.current = null;
@@ -241,6 +249,11 @@ export function RadiusMap({
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
+      {!carregado && !erro && (
+        <div className="absolute inset-0" aria-hidden>
+          <Skeleton className="h-full w-full rounded-none" />
+        </div>
+      )}
       {erro && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/90 p-6">
           <Alert variant="destructive" className="max-w-md">

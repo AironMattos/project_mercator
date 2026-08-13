@@ -40,35 +40,29 @@ def test_metricas_comercio_agregado_por_bairro_baseline_nao_aplicavel(client):
     assert all(linha["motivo_indisponivel"] == "nao_aplicavel_sem_territorio_id" for linha in linhas)
 
 
-def test_ranking_comercio_ordena_por_crescimento_relativo(client):
+def test_ranking_comercio_abaixo_do_piso_de_volume_fica_fora_da_lista_principal(client):
     resp = client.get("/ranking/comercio")
     assert resp.status_code == 200
-    itens = resp.json()
+    body = resp.json()
 
-    # BATEL fica de fora (baseline zero, sem variacao_pct) - só CENTRO é
-    # elegível nesse cenário semeado.
-    assert len(itens) == 1
-    assert itens[0]["territorio_id"] == "curitiba-bairro-centro"
-    assert itens[0]["nome"] == "Centro"
-    assert itens[0]["valor_atual"] == pytest.approx(1.0)
-    assert itens[0]["baseline"] == pytest.approx(0.125)
-    assert itens[0]["variacao_pct"] == pytest.approx(7.0)
-    assert itens[0]["tendencia"] == "acelerando"
-    assert itens[0]["posicao"] == 1
-    assert itens[0]["total"] == 1
-
-    # sparkline: 12 pontos mensais terminando no mês de referência
-    # (2026-07), o mês "atual" com valor 1 (CENTRO-004) é o último ponto.
-    serie = itens[0]["serie"]
-    assert len(serie) == 12
-    assert serie[-1]["mes"] == "2026-07-01"
-    assert serie[-1]["valor"] == pytest.approx(1.0)
+    # BATEL fica de fora por não ter variacao_pct (baseline zero). CENTRO
+    # tem variacao_pct calculável (baseline 0.125, ver comentário no topo
+    # do arquivo), mas 0.125 é bem abaixo do piso mínimo de volume do
+    # ranking (checkpoint 10d, BASELINE_MINIMO_RANKING=10) - variação
+    # percentual sobre uma fração de abertura por mês é ruído estatístico,
+    # não crescimento real. Fica de fora de `itens`, mas contado em
+    # `abaixo_do_piso_volume` - visível, não escondido. A mecânica de
+    # ordenação/sparkline em si (com baseline realista, acima do piso) é
+    # coberta em tests/analytics/features/test_indicadores.py, que não
+    # depende de fixture de banco.
+    assert body["itens"] == []
+    assert body["abaixo_do_piso_volume"] == 1
 
 
 def test_ranking_comercio_respeita_limite(client):
     resp = client.get("/ranking/comercio", params={"limite": 0})
     assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.json()["itens"] == []
 
 
 def test_bairro_resumo_inexistente_devolve_404(client):
@@ -93,8 +87,11 @@ def test_bairro_resumo_centro_traz_aberturas_confiavel_e_saldo_em_construcao(cli
     assert body["saldo"]["baseline"] is None
     assert body["saldo"]["motivo_indisponivel"] == "historico_insuficiente"
 
-    assert body["posicao_ranking"] == 1
-    assert body["total_ranking"] == 1
+    # Fora do ranking principal: baseline de aberturas (0.125) abaixo do
+    # piso mínimo de volume (checkpoint 10d) - ver
+    # test_ranking_comercio_abaixo_do_piso_de_volume_fica_fora_da_lista_principal.
+    assert body["posicao_ranking"] is None
+    assert body["total_ranking"] is None
 
     assert len(body["quebra_categoria"]) >= 1
     assert body["quebra_categoria"][0]["contagem"] >= 1
@@ -113,7 +110,9 @@ def test_bairro_resumo_batel_aberturas_com_baseline_zero(client):
     assert body["aberturas"]["variacao_pct"] is None
     assert body["aberturas"]["motivo_indisponivel"] == "baseline_zero"
 
-    # não elegível no ranking (sem variacao_pct) - mas o total ainda
-    # reflete quantos bairros SÃO elegíveis (1, só o Centro).
+    # não elegível no ranking (sem variacao_pct) - e o total também vem
+    # None porque o único outro bairro do cenário (Centro) está abaixo do
+    # piso mínimo de volume (checkpoint 10d), então a lista de elegíveis
+    # inteira fica vazia.
     assert body["posicao_ranking"] is None
-    assert body["total_ranking"] == 1
+    assert body["total_ranking"] is None

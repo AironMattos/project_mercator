@@ -240,7 +240,7 @@ def test_ranking_ordena_por_variacao_pct_nao_por_valor_absoluto():
 
 def test_ranking_exclui_itens_sem_variacao_pct_do_total():
     itens = [
-        ItemComBaseline(territorio_id="a", valor_atual=10.0, baseline=5.0, variacao_pct=1.0),
+        ItemComBaseline(territorio_id="a", valor_atual=20.0, baseline=10.0, variacao_pct=1.0),
         ItemComBaseline(territorio_id="sem-baseline", valor_atual=3.0, baseline=None, variacao_pct=None),
         ItemComBaseline(territorio_id="b", valor_atual=8.0, baseline=10.0, variacao_pct=-0.2),
     ]
@@ -264,8 +264,8 @@ def test_ranking_lista_vazia_quando_nenhum_item_elegivel():
 
 def test_ranking_desempata_por_territorio_id():
     itens = [
-        ItemComBaseline(territorio_id="zebra", valor_atual=10.0, baseline=5.0, variacao_pct=1.0),
-        ItemComBaseline(territorio_id="alfa", valor_atual=10.0, baseline=5.0, variacao_pct=1.0),
+        ItemComBaseline(territorio_id="zebra", valor_atual=20.0, baseline=10.0, variacao_pct=1.0),
+        ItemComBaseline(territorio_id="alfa", valor_atual=20.0, baseline=10.0, variacao_pct=1.0),
     ]
 
     resultado = calcular_ranking(itens)
@@ -276,10 +276,47 @@ def test_ranking_desempata_por_territorio_id():
 def test_ranking_carrega_tendencia_associada():
     itens = [
         ItemComBaseline(
-            territorio_id="a", valor_atual=10.0, baseline=5.0, variacao_pct=1.0, tendencia=ACELERANDO
+            territorio_id="a", valor_atual=20.0, baseline=10.0, variacao_pct=1.0, tendencia=ACELERANDO
         ),
     ]
 
     resultado = calcular_ranking(itens)
 
     assert resultado[0].tendencia == ACELERANDO
+
+
+# --- calcular_ranking: piso mínimo de volume (checkpoint 10d) -----------
+
+
+def test_ranking_exclui_baseline_abaixo_do_piso_minimo_de_volume():
+    itens = [
+        ItemComBaseline(territorio_id="volume-real", valor_atual=20.0, baseline=10.0, variacao_pct=1.0),
+        # variacao_pct alto, mas sobre um baseline de 2 - ruído estatístico
+        # de baixo volume, exatamente o padrão observado em produção
+        # (bairros pequenos com poucas aberturas reais no histórico).
+        ItemComBaseline(territorio_id="ruido-baixo-volume", valor_atual=6.0, baseline=2.0, variacao_pct=2.0),
+    ]
+
+    resultado = calcular_ranking(itens)
+
+    assert [r.territorio_id for r in resultado] == ["volume-real"]
+    assert resultado[0].total == 1
+
+
+def test_ranking_baseline_exatamente_no_piso_e_elegivel():
+    itens = [
+        ItemComBaseline(territorio_id="no-piso", valor_atual=20.0, baseline=10.0, variacao_pct=1.0),
+    ]
+
+    resultado = calcular_ranking(itens)
+
+    assert [r.territorio_id for r in resultado] == ["no-piso"]
+
+
+def test_ranking_piso_e_configuravel():
+    itens = [
+        ItemComBaseline(territorio_id="baseline-8", valor_atual=16.0, baseline=8.0, variacao_pct=1.0),
+    ]
+
+    assert calcular_ranking(itens) == []
+    assert [r.territorio_id for r in calcular_ranking(itens, baseline_minimo=5)] == ["baseline-8"]

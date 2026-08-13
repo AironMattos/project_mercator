@@ -175,13 +175,26 @@ type RankingItemApi = {
   serie: PontoSerie[];
 };
 
-export function getRanking(filtros: RankingFiltros = {}): Promise<RankingItem[]> {
-  return fetchJson<RankingItemApi[]>("/ranking/comercio", {
+type RankingApi = {
+  itens: RankingItemApi[];
+  // Bairros com variacao_pct calculável mas baseline abaixo do piso mínimo
+  // de volume (checkpoint 10d) - fora de `itens`, mas contados aqui, não
+  // escondidos (mesmo padrão de excluidosBaixaConfianca em busca-raio).
+  abaixo_do_piso_volume: number;
+};
+
+export type Ranking = {
+  itens: RankingItem[];
+  abaixoDoPisoVolume: number;
+};
+
+export function getRanking(filtros: RankingFiltros = {}): Promise<Ranking> {
+  return fetchJson<RankingApi>("/ranking/comercio", {
     categoria_id: filtros.categoriaId,
     periodo: filtros.periodo,
     limite: filtros.limite !== undefined ? String(filtros.limite) : undefined,
-  }).then((itens) =>
-    itens.map((i) => ({
+  }).then((resposta) => ({
+    itens: resposta.itens.map((i) => ({
       territorioId: i.territorio_id,
       nome: i.nome,
       valorAtual: i.valor_atual,
@@ -192,7 +205,8 @@ export function getRanking(filtros: RankingFiltros = {}): Promise<RankingItem[]>
       total: i.total,
       serie: i.serie,
     })),
-  );
+    abaixoDoPisoVolume: resposta.abaixo_do_piso_volume,
+  }));
 }
 
 type IndicadorApi = {
