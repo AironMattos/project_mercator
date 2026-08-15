@@ -1301,7 +1301,112 @@ resultado completo em `docs/fontes-imobiliario.md` (seção "Checkpoint 11d").
   sem drift novo (só o índice pré-existente já documentado desde o checkpoint 8). Total do
   projeto: **271 testes Python passando**.
 
-**Checkpoints 11e (features + API) e 11f (frontend) ainda não iniciados.**
+### Checkpoint 11e - Features e API: **concluído, rodado contra a API/banco reais**
+
+Seções 5 e 6 do prompt de referência. Todas as consultas são ao vivo (sem feature
+materializada nova) - volume do Radar Imobiliário é pequeno (milhares de eventos, não
+centenas de milhares como comércio), mesmo raciocínio que já vale para
+`geolocalizacao_repository.eventos_no_raio` (checkpoint 11d do Radar de Comércio).
+
+**Métrica 5 do prompt de referência (razão área licenciada/área construída existente)
+não implementada, de propósito** - o checkpoint 11a já havia confirmado que não existe
+nenhuma camada de footprint/estoque construído publicada pelo GeoCuritiba; implementar
+essa razão exigiria inventar um proxy para o denominador, o mesmo atalho que o projeto já
+recusa para `TRANSACAO`/`LANCAMENTO`. Documentado como lacuna real, não escondido.
+
+- `src/infrastructure/database/repositories/construcao_repository.py` (novo):
+  - `consultar_metricas_construcao` - alvarás aprovados/CVCOs concluídos por bairro (+ mês,
+    se `territorio_id` for informado), com área licenciada/concluída total. Junta
+    `fato_evento_territorial` com `observacao_entidade` via `origem_observacoes[1]` (a
+    única observação que sustenta um evento de obra) - `ALVARA_APROVADO` e
+    `OBRA_CONCLUIDA` sempre em campos separados, nunca somados (trava metodológica).
+  - `consultar_defasagem_mediana_por_bairro` - mediana em dias entre `ALVARA_APROVADO` e
+    `OBRA_CONCLUIDA` do mesmo empreendimento (mesma `entidade_id`, já que
+    `identificador_fonte` é o mesmo Número Alvará nos dois relatórios).
+    **Achado real, rodando contra dado real**: o campo "Data Vistoria" embutido no próprio
+    relatório de Alvará - citado no checkpoint 11a como um atalho possível para calcular
+    a defasagem sem cruzar os dois relatórios - está vazio em **100% das 2.214**
+    observações reais de `smu_alvara_construcao`. A defasagem só é calculável cruzando os
+    dois eventos por `entidade_id`, nunca lendo a mesma linha do relatório de alvará.
+    Piso mínimo de volume novo, `PISO_MINIMO_PARES_DEFASAGEM = 3` (mesmo espírito de
+    `BASELINE_MINIMO_RANKING` do checkpoint 10d, aplicado a uma contagem de pares
+    observados em vez de um baseline de série temporal) - `pares` sempre visível na
+    resposta, nunca escondido.
+- `valor_referencia_repository.consultar_valor_venal_mediano_por_bairro` (novo) -
+  reaproveita `domain.valuation.mediana_valor_m2` (a mesma regra pura que recusa misturar
+  `tipo_valor`/`componente` diferentes) agrupada por bairro em Python. Sem
+  baseline/variação/tendência nenhuma no retorno - trava "PGV não é série temporal"
+  (checkpoint 11a) garantida pela ausência do campo, não por uma checagem em runtime.
+- `zoneamento_repository.listar_zoneamento` (novo) - leitura simples, sem filtro de
+  vigência (a fonte ainda não passou por nenhuma revisão observada).
+- `contexto_bcb_repository.consultar_ultimo_periodo`,
+  `contexto_quintoandar_repository.consultar_ultimo_periodo`,
+  `contexto_censo_repository.consultar_agregado_por_bairro` (novos) - leitura do mês mais
+  recente disponível (BCB/QuintoAndar) e soma por bairro (Censo, agrupado a partir do
+  setor). **Densidade construtiva (métrica 6) rotulada como "densidade domiciliar"**, não
+  "densidade construtiva/footprint" como o prompt de referência original pedia - mesmo
+  motivo da métrica 5 (não existe footprint publicado); usa só o que o Censo de fato tem
+  (domicílios/km² por bairro), documentado como reinterpretação, não substituto
+  inventado.
+- `observacao_repository.contar_resolucao_territorio_por_fonte`,
+  `lote_cadastral_repository.contar_lotes`, `pipeline_run_repository.
+  ultima_execucao_com_sucesso` (ganhou `conector_id` opcional, retrocompatível) - suporte
+  ao indicador objetivo de qualidade de dado (trava metodológica "Qualidade de dado como
+  indicador objetivo").
+- `apps/api/routers/imoveis.py` (novo, prefixo `/imoveis` - a interpretação real do
+  "namespace novo `/api/imoveis/...`" do prompt de referência, já que nenhuma rota
+  existente do projeto usa prefixo `/api/`; adicionar um prefixo global só para este
+  produto seria inconsistente com o resto da API, não um desvio de escopo):
+  - `GET /imoveis/construcao` - sem `territorio_id`: agregado por bairro (período inteiro)
+    com defasagem mediana anexada; com `territorio_id`: série mensal, sem defasagem
+    (`motivo_indisponivel_defasagem="nao_aplicavel_no_modo_serie_mensal"` - amostra mensal
+    é sempre pequena demais pra mediana).
+  - `GET /imoveis/valor-referencia` - `tipo_valor`/`componente`/`fonte_id`/`metodologia`/
+    `vigencia_inicio` sempre explícitos (regra das quatro grandezas).
+  - `GET /imoveis/zoneamento` - GeoJSON FeatureCollection, mesmo padrão de `GET
+    /territorios`, com `data_versao`/`data_atualizacao` por feição.
+  - `GET /imoveis/contexto` - BCB (granularidade `uf`), QuintoAndar (`cidade`), Censo
+    (`setor_censitario_agregado_por_bairro`) - granularidade declarada em cada seção da
+    própria resposta.
+  - `GET /imoveis/qualidade-dados` - % de alvará/CVCO com território resolvido, contagem
+    de lotes sem geometria/sem território, vigência da PGV, última atualização por fonte
+    (8 conectores) - mesmo princípio de `GET /qualidade-dados` (comércio): fatos crus, sem
+    nota nem score composto.
+- `apps/api/main.py`: título trocado de "Mercator - Radar de Comércio API" para "Mercator
+  API" (a partir daqui a mesma API serve os dois produtos - o título antigo sugeria que
+  `/imoveis` seria secundário/fora do escopo).
+- **Achado de investigação, não um bug real**: `curl | python json.tool` e `print(repr(...))`
+  mostravam o campo `unidade` (`"m²"`/`"imóveis"`) como lixo de encoding duplo. Verificado
+  byte a byte (`.encode('utf-8').hex()`) direto no banco: o dado está 100% correto em UTF-8
+  - é o mesmo problema de exibição do console Windows já documentado nas Notas
+  operacionais, desta vez alcançando também pipes de shell/`print()`, não só o terminal
+  direto. Não mudou nada no código.
+- **Travas metodológicas** (seção 5, verificáveis em teste): #3 (piso mínimo de volume) e
+  #4 (PGV não é série temporal) testadas diretamente
+  (`test_construcao_agregado_piso_minimo_de_pares_para_defasagem`,
+  `test_valor_referencia_mediana_por_bairro_sem_variacao`). #6 (qualidade de dado como
+  indicador objetivo) testada via `test_qualidade_dados_conta_resolucao_de_territorio_e_fontes`.
+  #1 (nada de score composto) e #2 (ranking separa absoluto de percentual) satisfeitas por
+  desenho - nenhum ranking novo foi construído neste checkpoint (fora do escopo dos 4
+  endpoints do prompt de referência), e nenhum campo mistura contagem absoluta com
+  variação percentual em `/imoveis/construcao`. #5 (linguagem de associação, não
+  causalidade) é responsabilidade do texto exibido no frontend - fica para o checkpoint
+  11f.
+- **Rodado contra o banco/API reais**: `/imoveis/construcao` agregado devolve 73 bairros
+  (Água Verde: 51 alvarás/91.962 m² licenciados, 25 CVCOs/51.249 m² concluídos); série de
+  CENTRO devolve 7 meses. `/imoveis/valor-referencia` devolve 74 bairros (Capão da Imbuia:
+  R$1.244,22/m² mediano sobre 10 registros). `/imoveis/zoneamento` devolve 223 feições.
+  `/imoveis/contexto` devolve as 14 séries do BCB (PR, abril/2026), os 4 segmentos do
+  índice QuintoAndar (Curitiba, agosto/2025) e 74 bairros agregados do Censo (Cristo Rei:
+  7.460 domicílios/km², a maior densidade domiciliar da cidade). `/imoveis/qualidade-dados`
+  devolve 90,7%/91,9% de resolução de território (alvará/CVCO), 1 lote sem geometria/29.530
+  sem território, PGV vigente desde jan/2025 cobrindo 74 bairros (1.011 registros no
+  total). 12 testes novos (`tests/api/test_imoveis.py`, seed própria em
+  `tests/api/conftest.py` - 5 construções/2 bairros, cenário conhecido de piso mínimo).
+  Total do projeto: **283 testes Python passando**. `alembic check` sem drift novo (só o
+  já documentado desde o checkpoint 8 - nenhuma tabela nova neste checkpoint).
+
+**Checkpoint 11f (frontend) ainda não iniciado.**
 
 ## Notas operacionais
 

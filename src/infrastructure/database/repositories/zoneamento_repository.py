@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from geoalchemy2.shape import from_shape
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -40,3 +41,19 @@ def inserir_zoneamentos(session: Session, registros: list[dict]) -> int:
     )
     result = session.execute(stmt)
     return result.rowcount or 0
+
+
+def listar_zoneamento(
+    session: Session, territorio_id: str | None = None
+) -> list[ZoneamentoTerritorial]:
+    """Zoneamento vigente por polígono, com data_versao/data_atualizacao
+    (checkpoint 11e) - sem filtro de vigência por enquanto: a fonte
+    (checkpoint 11c) ainda não passou por nenhuma revisão observada;
+    quando isso acontecer, filtrar pela data_versao mais recente por
+    objectid_fonte é trabalho de quem detectar ZONEAMENTO_ALTERADO
+    (reservado, ainda não implementado), não deste endpoint de leitura.
+    """
+    stmt = select(ZoneamentoTerritorial)
+    if territorio_id is not None:
+        stmt = stmt.where(ZoneamentoTerritorial.territorio_id == territorio_id)
+    return list(session.execute(stmt).scalars())

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from geoalchemy2.shape import from_shape
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -80,3 +81,16 @@ def territorio_id_por_indicacao_fiscal(
         .all()
     )
     return {r.indicacao_fiscal: r.territorio_id for r in rows}
+
+
+def contar_lotes(session: Session) -> dict:
+    """(total, sem_geometria, sem_territorio) - indicador objetivo de
+    qualidade de dado (checkpoint 11e, GET /imoveis/qualidade-dados)."""
+    total = session.execute(select(func.count()).select_from(LoteCadastral)).scalar_one()
+    sem_geometria = session.execute(
+        select(func.count()).where(LoteCadastral.geometria.is_(None))
+    ).scalar_one()
+    sem_territorio = session.execute(
+        select(func.count()).where(LoteCadastral.territorio_id.is_(None))
+    ).scalar_one()
+    return {"total": total, "sem_geometria": sem_geometria, "sem_territorio": sem_territorio}

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import date
+
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -38,3 +41,31 @@ def inserir_indicadores_bcb(
     )
     result = session.execute(stmt)
     return result.rowcount or 0
+
+
+def consultar_ultimo_periodo(
+    session: Session, uf: str = "PR"
+) -> tuple[date | None, list[dict]]:
+    """As 14 séries do BCB no mês mais recente disponível para `uf` -
+    granularidade UF explícita no retorno (checkpoint 11d/11e: nunca
+    implicar Curitiba num dado que é do Paraná inteiro)."""
+    tabela = ContextoBcbImobiliario
+    ultimo = session.execute(
+        select(func.max(tabela.periodo_referencia)).where(tabela.uf == uf)
+    ).scalar()
+    if ultimo is None:
+        return None, []
+
+    stmt = select(tabela).where(tabela.uf == uf, tabela.periodo_referencia == ultimo)
+    itens = [
+        {
+            "indicador": row.indicador,
+            "categoria": row.categoria,
+            "tipo_valor": row.tipo_valor,
+            "unidade": row.unidade,
+            "leitura": float(row.leitura),
+            "fonte_id": row.fonte_id,
+        }
+        for row in session.execute(stmt).scalars()
+    ]
+    return ultimo, itens

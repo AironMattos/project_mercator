@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Iterator
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -118,3 +118,22 @@ def iter_observacoes_por_fonte(
             snapshot_ref=o.snapshot_ref,
             observacao_id=o.observacao_id,
         )
+
+
+def contar_resolucao_territorio_por_fonte(session: Session, fonte_id: str) -> tuple[int, int]:
+    """(total, com_territorio_resolvido) para uma fonte - indicador
+    objetivo de qualidade de dado (checkpoint 11e, GET
+    /imoveis/qualidade-dados), mesmo padrão de
+    geolocalizacao_repository.contar_por_confianca: contagem crua, sem
+    ponderação nem score."""
+    tabela = ObservacaoEntidadeORM
+    total = session.execute(
+        select(func.count()).where(tabela.fonte_id == fonte_id)
+    ).scalar_one()
+    resolvidos = session.execute(
+        select(func.count()).where(
+            tabela.fonte_id == fonte_id,
+            tabela.atributos["territorio_id"].astext.isnot(None),
+        )
+    ).scalar_one()
+    return total, resolvidos

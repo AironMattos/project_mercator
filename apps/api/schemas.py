@@ -229,3 +229,146 @@ class BuscaRaioOut(BaseModel):
     # None quando o raio não tem nenhum estabelecimento com bairro
     # resolvido.
     comparacao_bairro: ComparacaoBairroRaioOut | None
+
+
+# --- Radar Imobiliário (checkpoint 11e) ---------------------------------
+
+
+class MetricaConstrucaoOut(BaseModel):
+    """Alvará e CVCO sempre em campos separados, nunca somados numa
+    métrica única de "atividade construtiva" (seção 3.1 do prompt de
+    referência do Radar Imobiliário: respondem perguntas diferentes -
+    "onde vai mudar" vs. "onde já mudou")."""
+
+    territorio_id: str | None
+    mes: date | None
+    alvaras_aprovados: int
+    area_licenciada_m2: float
+    cvcos_concluidos: int
+    area_concluida_m2: float
+    # Só preenchidos no modo agregado por bairro (sem territorio_id no
+    # filtro) - por mês a amostra é sempre pequena demais pra sustentar
+    # uma mediana (ver PISO_MINIMO_PARES_DEFASAGEM). motivo_indisponivel
+    # segue o mesmo vocabulário de indicadores.py
+    # ("historico_insuficiente"), nunca escondendo um bairro com poucos
+    # pares atrás de um número calculado sobre amostra fraca.
+    defasagem_mediana_dias: float | None = None
+    pares_alvara_cvco: int | None = None
+    motivo_indisponivel_defasagem: str | None = None
+
+
+class ValorReferenciaBairroOut(BaseModel):
+    """Valor venal (PGV) por bairro - tipo_valor/componente/fonte_id
+    sempre explícitos (regra das quatro grandezas, seção 1 do prompt de
+    referência). Sem baseline/variacao_pct de propósito: PGV não é série
+    temporal (seção 5, trava "PGV não é série temporal") - só nível e
+    vigência."""
+
+    territorio_id: str
+    valor_m2_mediano: float
+    tipo_valor: str
+    componente: str
+    quantidade_registros: int
+    fonte_id: str
+    metodologia: str | None
+    vigencia_inicio: date
+
+
+class ZoneamentoOut(BaseModel):
+    objectid_fonte: int
+    territorio_id: str | None
+    cd_zona: str
+    sg_zona: str
+    nm_zona: str
+    nm_grupo: str | None
+    legislacao: str | None
+    data_versao: str | None
+    data_atualizacao: str | None
+    geometry: dict[str, Any] | None
+
+
+class BcbIndicadorOut(BaseModel):
+    indicador: str
+    categoria: str
+    tipo_valor: str | None
+    unidade: str
+    leitura: float
+    fonte_id: str
+
+
+class ContextoBcbOut(BaseModel):
+    granularidade: str = "uf"
+    uf: str
+    periodo_referencia: date | None
+    indicadores: list[BcbIndicadorOut]
+
+
+class QuintoandarSegmentoOut(BaseModel):
+    segmento: str
+    aluguel_m2: float
+    variacao_mensal: float | None
+    variacao_12m: float | None
+    fonte_id: str
+
+
+class ContextoQuintoandarOut(BaseModel):
+    granularidade: str = "cidade"
+    cidade: str
+    periodo_referencia: date | None
+    segmentos: list[QuintoandarSegmentoOut]
+
+
+class CensoBairroOut(BaseModel):
+    territorio_id: str
+    populacao_total: int
+    domicilios_total: int
+    domicilios_particulares_ocupados: int
+    area_km2: float | None
+    densidade_domicilios_km2: float | None
+    setores_agregados: int
+
+
+class ContextoCensoOut(BaseModel):
+    # "agregado por bairro" porque a fonte real é por setor censitário,
+    # somado aqui - nunca implica um levantamento independente por
+    # bairro (ver domain/contexto/models.py).
+    granularidade: str = "setor_censitario_agregado_por_bairro"
+    ano_referencia: int
+    bairros: list[CensoBairroOut]
+
+
+class ContextoImoveisOut(BaseModel):
+    bcb: ContextoBcbOut
+    quintoandar: ContextoQuintoandarOut
+    censo: ContextoCensoOut
+
+
+class ResolucaoTerritorioOut(BaseModel):
+    total: int
+    com_territorio_resolvido: int
+    pct_territorio_resolvido: float
+
+
+class LoteCadastralQualidadeOut(BaseModel):
+    total: int
+    sem_geometria: int
+    sem_territorio: int
+
+
+class QualidadeDadosImoveisOut(BaseModel):
+    """Mesmo princípio de QualidadeDadosOut (comércio): fatos crus, sem
+    nota nem score composto - seção "QUALIDADE DOS DADOS" (trava
+    metodológica) do prompt de referência do Radar Imobiliário."""
+
+    alvaras: ResolucaoTerritorioOut
+    cvcos: ResolucaoTerritorioOut
+    lote_cadastral: LoteCadastralQualidadeOut
+    pgv_vigencia_inicio: date | None
+    # Nomes deliberadamente distintos: "bairros_cobertos" é quantos
+    # bairros têm pelo menos uma microrregião da PGV; "total_registros" é
+    # a soma de microrregiões somadas em todos os bairros - os dois
+    # números são reais e diferentes (achado do checkpoint 11c: um bairro
+    # comum tem várias microrregiões), nunca colapsados num só.
+    pgv_bairros_cobertos: int
+    pgv_total_registros: int
+    ultima_atualizacao_por_fonte: dict[str, datetime | None]

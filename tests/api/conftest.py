@@ -18,14 +18,25 @@ from infrastructure.database.orm.contagem_inicio_atividade import ContagemInicio
 from infrastructure.database.orm.dim_categoria import DimCategoria
 from infrastructure.database.orm.dim_cnae import DimCnae
 from infrastructure.database.orm.entidade import Entidade
+from infrastructure.database.orm.fato_evento_territorial import FatoEventoTerritorial
 from infrastructure.database.orm.geolocalizacao_entidade import GeolocalizacaoEntidade
 from infrastructure.database.orm.observacao_entidade import ObservacaoEntidade
 from infrastructure.database.orm.territorio import DimTerritorio
 
-# Modelos ORM importados aqui só para registrar em Base.metadata antes do
-# create_all - a API não usa evento diretamente, mas a tabela precisa
-# existir por causa das foreign keys.
-from infrastructure.database.orm import fato_evento_territorial  # noqa: F401
+# Radar Imobiliário (checkpoint 11e) - modelos novos, seed própria mais
+# abaixo.
+from infrastructure.database.orm.contexto_bcb_imobiliario import ContextoBcbImobiliario
+from infrastructure.database.orm.contexto_censo_setor import ContextoCensoSetor
+from infrastructure.database.orm.contexto_quintoandar_aluguel import (
+    ContextoQuintoandarAluguel,
+)
+from infrastructure.database.orm.lote_cadastral import LoteCadastral
+from infrastructure.database.orm.valor_referencia_territorial import (
+    ValorReferenciaTerritorial,
+)
+from infrastructure.database.orm.zoneamento_territorial import ZoneamentoTerritorial
+
+# Modelo importado só pra registrar em Base.metadata antes do create_all.
 from infrastructure.database.orm import pipeline_run  # noqa: F401
 
 ADMIN_DATABASE_URL = os.environ.get(
@@ -351,6 +362,229 @@ def seeded_session(test_engine):
                 ponto=from_shape(_deslocado(5000), srid=4326),
                 confianca="alta",
                 fonte_primaria="geocodebr",
+            ),
+        ]
+    )
+
+    # --- Radar Imobiliário (checkpoint 11e) --------------------------
+    # 4 construções em CENTRO (3 pares alvará->CVCO completos, pra
+    # limpar o piso mínimo de PISO_MINIMO_PARES_DEFASAGEM=3, + 1 alvará
+    # sem CVCO ainda) e 1 em BATEL (1 par só, testa o caminho "abaixo do
+    # piso" -> motivo_indisponivel="historico_insuficiente").
+    entidades_obra = {
+        nome: uuid.uuid4()
+        for nome in ("centro-1", "centro-2", "centro-3", "centro-4-sem-cvco", "batel-1")
+    }
+    session.add_all(
+        [
+            Entidade(entidade_id=eid, tipo_entidade="obra", identificador_fonte=f"ALVARA-{nome}")
+            for nome, eid in entidades_obra.items()
+        ]
+    )
+    session.flush()
+
+    def _obs_obra(nome: str, fonte_id: str, observado_em: date, metragem: str | None, area_vistoria: str | None, territorio_id: str):
+        return ObservacaoEntidade(
+            entidade_id=entidades_obra[nome],
+            observado_em=observado_em,
+            atributos={
+                "territorio_id": territorio_id,
+                "metragem_construida_lote": metragem,
+                "area_vistoria": area_vistoria,
+                "data_criacao_alvara": None,
+                "data_vistoria": None,
+            },
+            fonte_id=fonte_id,
+            snapshot_ref="teste",
+        )
+
+    obs_alvara_centro_1 = _obs_obra("centro-1", "smu_alvara_construcao", date(2026, 1, 1), "100,00", None, "curitiba-bairro-centro")
+    obs_cvco_centro_1 = _obs_obra("centro-1", "smu_cvco", date(2026, 3, 1), None, "90,00", "curitiba-bairro-centro")
+    obs_alvara_centro_2 = _obs_obra("centro-2", "smu_alvara_construcao", date(2026, 1, 1), "200,50", None, "curitiba-bairro-centro")
+    obs_cvco_centro_2 = _obs_obra("centro-2", "smu_cvco", date(2026, 3, 15), None, "180,25", "curitiba-bairro-centro")
+    obs_alvara_centro_3 = _obs_obra("centro-3", "smu_alvara_construcao", date(2026, 2, 1), "50,00", None, "curitiba-bairro-centro")
+    obs_cvco_centro_3 = _obs_obra("centro-3", "smu_cvco", date(2026, 4, 1), None, "45,00", "curitiba-bairro-centro")
+    obs_alvara_centro_4 = _obs_obra("centro-4-sem-cvco", "smu_alvara_construcao", date(2026, 2, 1), "300,00", None, "curitiba-bairro-centro")
+    obs_alvara_batel_1 = _obs_obra("batel-1", "smu_alvara_construcao", date(2026, 1, 1), "80,00", None, "curitiba-bairro-batel")
+    obs_cvco_batel_1 = _obs_obra("batel-1", "smu_cvco", date(2026, 2, 1), None, "70,00", "curitiba-bairro-batel")
+
+    todas_observacoes = [
+        obs_alvara_centro_1, obs_cvco_centro_1,
+        obs_alvara_centro_2, obs_cvco_centro_2,
+        obs_alvara_centro_3, obs_cvco_centro_3,
+        obs_alvara_centro_4,
+        obs_alvara_batel_1, obs_cvco_batel_1,
+    ]
+    session.add_all(todas_observacoes)
+    session.flush()
+
+    def _evento_obra(observacao: ObservacaoEntidade, event_type: str, territorio_id: str, data_evento: date):
+        return FatoEventoTerritorial(
+            entity_type="obra",
+            event_type=event_type,
+            entidade_id=observacao.entidade_id,
+            territorio_id=territorio_id,
+            data_evento=data_evento,
+            confianca="alta",
+            origem_observacoes=[observacao.observacao_id],
+            payload={},
+        )
+
+    session.add_all(
+        [
+            _evento_obra(obs_alvara_centro_1, "ALVARA_APROVADO", "curitiba-bairro-centro", date(2026, 1, 1)),
+            _evento_obra(obs_cvco_centro_1, "OBRA_CONCLUIDA", "curitiba-bairro-centro", date(2026, 3, 1)),
+            _evento_obra(obs_alvara_centro_2, "ALVARA_APROVADO", "curitiba-bairro-centro", date(2026, 1, 1)),
+            _evento_obra(obs_cvco_centro_2, "OBRA_CONCLUIDA", "curitiba-bairro-centro", date(2026, 3, 15)),
+            _evento_obra(obs_alvara_centro_3, "ALVARA_APROVADO", "curitiba-bairro-centro", date(2026, 2, 1)),
+            _evento_obra(obs_cvco_centro_3, "OBRA_CONCLUIDA", "curitiba-bairro-centro", date(2026, 4, 1)),
+            _evento_obra(obs_alvara_centro_4, "ALVARA_APROVADO", "curitiba-bairro-centro", date(2026, 2, 1)),
+            _evento_obra(obs_alvara_batel_1, "ALVARA_APROVADO", "curitiba-bairro-batel", date(2026, 1, 1)),
+            _evento_obra(obs_cvco_batel_1, "OBRA_CONCLUIDA", "curitiba-bairro-batel", date(2026, 2, 1)),
+        ]
+    )
+
+    # PGV - CENTRO com 2 microrregiões (mediana real), BATEL sem nenhuma
+    # (bairro sem dado de valor venal, testa ausência).
+    pgv_geom = _multi(
+        (-49.276, -25.436), (-49.275, -25.436), (-49.275, -25.435), (-49.276, -25.435), (-49.276, -25.436)
+    )
+    session.add_all(
+        [
+            ValorReferenciaTerritorial(
+                geometria=from_shape(pgv_geom, srid=4326),
+                objectid_fonte=1,
+                territorio_id="curitiba-bairro-centro",
+                tipo_valor="venal",
+                componente="terreno",
+                valor_m2=1000.0,
+                moeda_data=date(2025, 1, 1),
+                fonte_id="ippuc_pgv",
+                metodologia="Planta Genérica de Valores (IPPUC) - teste",
+                vigencia_inicio=date(2025, 1, 1),
+                snapshot_ref="teste",
+            ),
+            ValorReferenciaTerritorial(
+                geometria=from_shape(pgv_geom, srid=4326),
+                objectid_fonte=2,
+                territorio_id="curitiba-bairro-centro",
+                tipo_valor="venal",
+                componente="terreno",
+                valor_m2=1200.0,
+                moeda_data=date(2025, 1, 1),
+                fonte_id="ippuc_pgv",
+                metodologia="Planta Genérica de Valores (IPPUC) - teste",
+                vigencia_inicio=date(2025, 1, 1),
+                snapshot_ref="teste",
+            ),
+        ]
+    )
+
+    # Zoneamento - um polígono, sem território resolvido (mesmo padrão
+    # real: a camada não carrega nome de bairro por feição).
+    session.add(
+        ZoneamentoTerritorial(
+            geometria=from_shape(pgv_geom, srid=4326),
+            territorio_id=None,
+            objectid_fonte=1,
+            cd_zona="ZR",
+            sg_zona="ZR-1",
+            nm_zona="Zona Residencial 1",
+            nm_grupo="Zonas Residenciais",
+            legislacao="Lei nº 15.511/2019",
+            data_versao="2020-01",
+            data_atualizacao="2019-06",
+            fonte_id="geocuritiba_zoneamento",
+            snapshot_ref="teste",
+        )
+    )
+
+    # Lote cadastral - 2 lotes, 1 sem geometria e sem território (testa
+    # os contadores de qualidade de dado).
+    session.add_all(
+        [
+            LoteCadastral(
+                objectid_fonte=1,
+                indicacao_fiscal="12006027",
+                inscricao_imobiliaria="123456",
+                area_terreno=300.0,
+                nome_bairro="CENTRO",
+                territorio_id="curitiba-bairro-centro",
+                sigla_zoneamento="ZR-1",
+                geometria=from_shape(pgv_geom, srid=4326),
+                fonte_id="geocuritiba_lote_cadastral",
+                snapshot_ref="teste",
+            ),
+            LoteCadastral(
+                objectid_fonte=2,
+                indicacao_fiscal="99999999",
+                inscricao_imobiliaria=None,
+                area_terreno=None,
+                nome_bairro=None,
+                territorio_id=None,
+                sigla_zoneamento=None,
+                geometria=None,
+                fonte_id="geocuritiba_lote_cadastral",
+                snapshot_ref="teste",
+            ),
+        ]
+    )
+
+    # Contexto (BCB/QuintoAndar/Censo) - dois meses pra confirmar que a
+    # API pega o mais recente, não uma mistura dos dois.
+    session.add_all(
+        [
+            ContextoBcbImobiliario(
+                uf="PR", periodo_referencia=date(2026, 6, 1), indicador="imoveis_valor_avaliacao",
+                categoria="valor", tipo_valor="avaliacao", unidade="R$", leitura=280000,
+                fonte_id="bcb_mercado_imobiliario", snapshot_ref="teste",
+            ),
+            ContextoBcbImobiliario(
+                uf="PR", periodo_referencia=date(2026, 7, 1), indicador="imoveis_valor_avaliacao",
+                categoria="valor", tipo_valor="avaliacao", unidade="R$", leitura=300000,
+                fonte_id="bcb_mercado_imobiliario", snapshot_ref="teste",
+            ),
+            ContextoBcbImobiliario(
+                uf="PR", periodo_referencia=date(2026, 7, 1), indicador="imoveis_valor_compra",
+                categoria="valor", tipo_valor="transacao", unidade="R$", leitura=290000,
+                fonte_id="bcb_mercado_imobiliario", snapshot_ref="teste",
+            ),
+            ContextoBcbImobiliario(
+                uf="PR", periodo_referencia=date(2026, 7, 1), indicador="imoveis_dormitorio_2",
+                categoria="contagem", tipo_valor=None, unidade="imóveis", leitura=300,
+                fonte_id="bcb_mercado_imobiliario", snapshot_ref="teste",
+            ),
+        ]
+    )
+    session.add_all(
+        [
+            ContextoQuintoandarAluguel(
+                cidade="Curitiba", periodo_referencia=date(2026, 6, 1), segmento="cidade_toda",
+                aluguel_m2=40.0, variacao_mensal=0.01, variacao_12m=0.1,
+                fonte_id="quintoandar_indice_aluguel", snapshot_ref="teste",
+            ),
+            ContextoQuintoandarAluguel(
+                cidade="Curitiba", periodo_referencia=date(2026, 7, 1), segmento="cidade_toda",
+                aluguel_m2=42.0, variacao_mensal=0.02, variacao_12m=0.12,
+                fonte_id="quintoandar_indice_aluguel", snapshot_ref="teste",
+            ),
+        ]
+    )
+    session.add_all(
+        [
+            ContextoCensoSetor(
+                setor_censitario="410690205010001", territorio_id="curitiba-bairro-centro",
+                municipio_codigo="4106902", area_km2=0.5, populacao_total=1000,
+                domicilios_total=400, domicilios_particulares_ocupados=350,
+                domicilios_particulares_vagos=50, ano_referencia=2022,
+                fonte_id="ibge_censo_setor", snapshot_ref="teste",
+            ),
+            ContextoCensoSetor(
+                setor_censitario="410690205010002", territorio_id="curitiba-bairro-centro",
+                municipio_codigo="4106902", area_km2=0.5, populacao_total=800,
+                domicilios_total=300, domicilios_particulares_ocupados=280,
+                domicilios_particulares_vagos=20, ano_referencia=2022,
+                fonte_id="ibge_censo_setor", snapshot_ref="teste",
             ),
         ]
     )

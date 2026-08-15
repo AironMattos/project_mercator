@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from geoalchemy2.shape import from_shape
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from domain.valuation import ValorReferenciaTerritorial
+from domain.valuation import ValorMonetario, ValorReferenciaTerritorial, mediana_valor_m2
 from infrastructure.database.orm.valor_referencia_territorial import (
     ValorReferenciaTerritorial as ValorReferenciaTerritorialOrm,
 )
@@ -48,3 +49,61 @@ def inserir_valores_referencia(
     )
     result = session.execute(stmt)
     return result.rowcount or 0
+
+
+def consultar_valor_venal_mediano_por_bairro(session: Session) -> list[dict]:
+    """Valor venal mediano de terreno (R$/m²) por bairro, a partir da PGV
+    (checkpoint 11c/11e) - reaproveita domain.valuation.mediana_valor_m2,
+    a mesma regra pura que recusa misturar tipo_valor/componente
+    diferentes na mesma mediana (trava metodológica: fórmula pública e
+    reproduzível, "mediana simples de valor_m2", nunca um score
+    ponderado). PGV não é série temporal (checkpoint 11a) - a saída é um
+    nível único com vigência explícita, nunca uma variação percentual.
+    """
+    tabela = ValorReferenciaTerritorialOrm
+    stmt = select(
+        tabela.territorio_id,
+        tabela.valor_m2,
+        tabela.tipo_valor,
+        tabela.componente,
+        tabela.fonte_id,
+        tabela.metodologia,
+        tabela.vigencia_inicio,
+    ).where(
+        tabela.tipo_valor == "venal",
+        tabela.componente == "terreno",
+        tabela.territorio_id.isnot(None),
+    )
+
+    valores_por_bairro: dict[str, list[ValorMonetario]] = {}
+    metodologia_por_bairro: dict[str, str | None] = {}
+    vigencia_por_bairro: dict[str, object] = {}
+    fonte_por_bairro: dict[str, str] = {}
+    for row in session.execute(stmt):
+        valores_por_bairro.setdefault(row.territorio_id, []).append(
+            ValorMonetario(
+                valor_m2=float(row.valor_m2),
+                tipo_valor=row.tipo_valor,
+                componente=row.componente,
+                fonte_id=row.fonte_id,
+            )
+        )
+        metodologia_por_bairro[row.territorio_id] = row.metodologia
+        vigencia_por_bairro[row.territorio_id] = row.vigencia_inicio
+        fonte_por_bairro[row.territorio_id] = row.fonte_id
+
+    resultado = []
+    for territorio_id, valores in valores_por_bairro.items():
+        resultado.append(
+            {
+                "territorio_id": territorio_id,
+                "valor_m2_mediano": mediana_valor_m2(valores),
+                "tipo_valor": "venal",
+                "componente": "terreno",
+                "quantidade_registros": len(valores),
+                "fonte_id": fonte_por_bairro[territorio_id],
+                "metodologia": metodologia_por_bairro[territorio_id],
+                "vigencia_inicio": vigencia_por_bairro[territorio_id],
+            }
+        )
+    return resultado

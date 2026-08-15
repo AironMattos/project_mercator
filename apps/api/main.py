@@ -10,6 +10,7 @@ from routers import (
     bairros,
     busca_raio,
     categorias,
+    imoveis,
     metodologia,
     metricas,
     ranking,
@@ -35,7 +36,10 @@ def _cors_origins() -> list[str]:
     return origins
 
 
-app = FastAPI(title="Mercator - Radar de Comércio API")
+# A partir do checkpoint 11e (Radar Imobiliário, /imoveis/...) esta API
+# serve os dois produtos - título atualizado de "Radar de Comércio API"
+# pra não sugerir que /imoveis é secundário/fora do escopo.
+app = FastAPI(title="Mercator API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -52,6 +56,7 @@ app.include_router(bairros.router)
 app.include_router(busca_raio.router)
 app.include_router(metodologia.router)
 app.include_router(sinais.router)
+app.include_router(imoveis.router)
 
 
 @app.get("/health")
