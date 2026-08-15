@@ -91,3 +91,30 @@ def iter_grupos_por_entidade(
         )
     if grupo:
         yield grupo_id, grupo
+
+
+def iter_observacoes_por_fonte(
+    session: Session, fonte_id: str, observado_em: date | None = None
+) -> Iterator[ObservacaoEntidade]:
+    """Todas as observações de uma fonte (opcionalmente filtradas por
+    mês). Usada por detecção de evento que deriva o fato de uma única
+    observação (ex.: obra - ver detectar_evento_obra), sem precisar
+    comparar par de datas como iter_grupos_por_entidade. Cursor
+    server-side, mesmo motivo de segurança de memória.
+    """
+    tabela = ObservacaoEntidadeORM
+    stmt = select(tabela).where(tabela.fonte_id == fonte_id)
+    if observado_em is not None:
+        stmt = stmt.where(tabela.observado_em == observado_em)
+    stmt = stmt.execution_options(yield_per=2000)
+
+    for row in session.execute(stmt):
+        o = row[0]
+        yield ObservacaoEntidade(
+            entidade_id=o.entidade_id,
+            observado_em=o.observado_em,
+            atributos=o.atributos,
+            fonte_id=o.fonte_id,
+            snapshot_ref=o.snapshot_ref,
+            observacao_id=o.observacao_id,
+        )

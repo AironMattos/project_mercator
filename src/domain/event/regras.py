@@ -99,6 +99,53 @@ def detectar_desaparecimento(
     )
 
 
+_CAMPO_DATA_POR_EVENTO_OBRA = {
+    "ALVARA_APROVADO": "data_criacao_alvara",
+    "OBRA_CONCLUIDA": "data_vistoria",
+}
+
+
+def detectar_evento_obra(
+    observacao: ObservacaoEntidade, event_type: str, entity_type: str = "obra"
+) -> Evento | None:
+    """Deriva um evento de obra (ALVARA_APROVADO ou OBRA_CONCLUIDA) direto
+    de uma única observação - diferente do comércio, que precisa comparar
+    dois snapshots (anterior/atual) para inferir o que aconteceu. Aqui não
+    há inferência: o relatório de origem (SMU) já informa a data exata do
+    fato (Data Criação Alvará / Data Vistoria) linha a linha, então a
+    observação sozinha já é prova suficiente - por isso confiança é
+    sempre "alta" e origem_observacoes aponta só para essa observação.
+
+    event_type decide qual campo de data usar - quem chama sabe qual
+    relatório gerou a observação (smu_alvara_construcao ou smu_cvco) e
+    pede o evento correspondente; a função não adivinha pelo fonte_id.
+
+    Devolve None quando a data relevante não está presente (ex.: CVCO sem
+    Data Vistoria preenchida) - sem essa data não há o que datar o
+    evento, e um evento sem data não é uma opção válida no domínio.
+    """
+    campo_data = _CAMPO_DATA_POR_EVENTO_OBRA.get(event_type)
+    if campo_data is None:
+        raise ValueError(
+            f"event_type não suportado para obra: {event_type!r}. "
+            f"Deve ser um de {sorted(_CAMPO_DATA_POR_EVENTO_OBRA)}"
+        )
+
+    data_bruta = observacao.atributos.get(campo_data)
+    if not data_bruta:
+        return None
+
+    return Evento(
+        entity_type=entity_type,
+        event_type=event_type,
+        entidade_id=observacao.entidade_id,
+        territorio_id=observacao.atributos.get("territorio_id"),
+        data_evento=date.fromisoformat(data_bruta),
+        confianca="alta",
+        origem_observacoes=(observacao.observacao_id,),
+    )
+
+
 def _abriu_no_periodo_do_snapshot(observacao: ObservacaoEntidade) -> bool:
     inicio = observacao.atributos.get("inicio_atividade")
     if not inicio:

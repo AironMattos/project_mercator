@@ -1,5 +1,9 @@
 from domain.event.models import CONFIANCAS_VALIDAS, TIPOS_EVENTO_VALIDOS, Evento
-from domain.event.regras import detectar_desaparecimento, detectar_eventos_par
+from domain.event.regras import (
+    detectar_desaparecimento,
+    detectar_evento_obra,
+    detectar_eventos_par,
+)
 
 __all__ = [
     "Evento",
@@ -7,4 +11,5 @@ __all__ = [
     "CONFIANCAS_VALIDAS",
     "detectar_eventos_par",
     "detectar_desaparecimento",
+    "detectar_evento_obra",
 ]

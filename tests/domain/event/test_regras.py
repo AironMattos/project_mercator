@@ -1,7 +1,9 @@
 import uuid
 from datetime import date
 
-from domain.event import detectar_desaparecimento, detectar_eventos_par
+import pytest
+
+from domain.event import detectar_desaparecimento, detectar_evento_obra, detectar_eventos_par
 from domain.observation import ObservacaoEntidade
 
 ENTITY_TYPE = "comercio"
@@ -143,3 +145,44 @@ def test_desaparecimento():
     assert evento.territorio_id == "curitiba-bairro-centro"
     assert evento.data_evento == date(2026, 8, 1)
     assert evento.origem_observacoes == (ultima.observacao_id,)
+
+
+def test_detectar_evento_obra_alvara_aprovado():
+    observacao = _observacao(
+        date(2026, 1, 1),
+        {
+            "data_criacao_alvara": "2026-01-15",
+            "territorio_id": "curitiba-bairro-bairro-alto",
+        },
+    )
+
+    evento = detectar_evento_obra(observacao, "ALVARA_APROVADO")
+
+    assert evento.event_type == "ALVARA_APROVADO"
+    assert evento.entity_type == "obra"
+    assert evento.confianca == "alta"
+    assert evento.data_evento == date(2026, 1, 15)
+    assert evento.territorio_id == "curitiba-bairro-bairro-alto"
+    assert evento.origem_observacoes == (observacao.observacao_id,)
+
+
+def test_detectar_evento_obra_obra_concluida_usa_data_vistoria():
+    observacao = _observacao(date(2026, 1, 1), {"data_vistoria": "2026-01-20"})
+
+    evento = detectar_evento_obra(observacao, "OBRA_CONCLUIDA")
+
+    assert evento.event_type == "OBRA_CONCLUIDA"
+    assert evento.data_evento == date(2026, 1, 20)
+
+
+def test_detectar_evento_obra_sem_data_relevante_devolve_none():
+    observacao = _observacao(date(2026, 1, 1), {"data_vistoria": None})
+
+    assert detectar_evento_obra(observacao, "OBRA_CONCLUIDA") is None
+
+
+def test_detectar_evento_obra_event_type_invalido_rejeitado():
+    observacao = _observacao(date(2026, 1, 1), {"numero_alvara": "123"})
+
+    with pytest.raises(ValueError):
+        detectar_evento_obra(observacao, "DEMOLICAO_QUALQUER_COISA")

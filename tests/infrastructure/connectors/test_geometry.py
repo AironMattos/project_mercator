@@ -1,4 +1,4 @@
-from infrastructure.connectors.geocuritiba_bairro.geometry import (
+from infrastructure.connectors.geometry import (
     aneis_esri_para_multipolygon,
     anel_e_horario,
     reprojetar_anel,

@@ -8,27 +8,34 @@ from typing import Any
 
 import requests
 
-from domain.territory import Territorio
 from infrastructure.connectors.base import RawSnapshot
 from infrastructure.connectors.geometry import aneis_esri_para_multipolygon
-from infrastructure.connectors.text import slugify
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = (
     "https://geocuritiba.ippuc.org.br/server/rest/services/GeoCuritiba/"
-    "Publico_GeoCuritiba_MapaCadastral/MapServer/2"
+    "Publico_GeoCuritiba_MapaCadastral/MapServer/36"
 )
-RAW_DIR = Path("data/raw/geocuritiba_bairro")
+RAW_DIR = Path("data/raw/geocuritiba_zoneamento")
 
 
-class GeoCuritibaBairroConnector:
-    """Conector da camada Bairro do GeoCuritiba (IPPUC), servida via ArcGIS
-    REST. Fonte estática de referência - limites de bairro não mudam com
-    cadência mensal como as demais fontes do projeto.
+class ZoneamentoConnector:
+    """Conector da camada "Zoneamento Lei 15.511/2019" do GeoCuritiba
+    (MapaCadastral, layer 36) - 223 polígonos, confirmado no checkpoint
+    11a. Só classificação de zona (código/nome/sigla/legislação) e as
+    duas datas de versionamento que a própria camada expõe - sem índice
+    construtivo/gabarito/taxa de ocupação, que nenhuma camada pública do
+    GeoCuritiba carrega.
+
+    territorio_id fica sempre None aqui: a camada não carrega nome de
+    bairro por feição (campos confirmados no checkpoint 11a não incluem
+    isso), então não há slug pra casar contra dim_territorio - resolver
+    por bairro exigiria um join espacial (centróide dentro do polígono
+    de dim_territorio), fora do escopo deste conector.
     """
 
-    fonte_id = "geocuritiba_bairro"
+    fonte_id = "geocuritiba_zoneamento"
     cadencia = "estatica"
 
     def __init__(
@@ -62,29 +69,40 @@ class GeoCuritibaBairroConnector:
             conteudo=features,
         )
 
-    def normalize(self, snapshot: RawSnapshot) -> list[Territorio]:
-        territorios = []
+    def normalize(self, snapshot: RawSnapshot) -> list[dict[str, Any]]:
+        """Devolve dicts prontos para o repositório (não um dataclass de
+        domínio dedicado - esta camada é classificação/versionamento
+        puro, sem regra de negócio associada além do que a fonte já
+        expõe; um dataclass aqui só duplicaria os mesmos campos do
+        ORM sem validação adicional)."""
+        registros = []
         for feature in snapshot.conteudo:
             attrs = feature["attributes"]
             rings = feature.get("geometry", {}).get("rings", [])
-            nome = (attrs.get("nome") or "").strip()
-            if not nome:
+            if not rings:
                 logger.warning(
-                    "feature sem nome ignorada: objectid=%s", attrs.get("objectid")
+                    "feição de zoneamento sem geometria ignorada: objectid=%s",
+                    attrs.get("objectid"),
                 )
                 continue
 
-            geometria = aneis_esri_para_multipolygon(rings) if rings else None
-            territorios.append(
-                Territorio(
-                    territorio_id=f"curitiba-bairro-{slugify(nome)}",
-                    nivel="bairro",
-                    nome=nome,
-                    geometria=geometria,
-                    cidade_id="curitiba",
-                )
+            registros.append(
+                {
+                    "geometria": aneis_esri_para_multipolygon(rings),
+                    "objectid_fonte": attrs["objectid"],
+                    "cd_zona": attrs.get("cd_zona") or "",
+                    "sg_zona": attrs.get("sg_zona") or "",
+                    "nm_zona": attrs.get("nm_zona") or "",
+                    "nm_grupo": attrs.get("nm_grupo"),
+                    "legislacao": attrs.get("legislacao"),
+                    "data_versao": attrs.get("data_versao"),
+                    "data_atualizacao": attrs.get("data_atualizacao"),
+                    "territorio_id": None,
+                    "fonte_id": self.fonte_id,
+                    "snapshot_ref": snapshot.snapshot_ref,
+                }
             )
-        return territorios
+        return registros
 
     def _max_record_count(self) -> int:
         resp = self._session.get(self._base_url, params={"f": "json"}, timeout=30)

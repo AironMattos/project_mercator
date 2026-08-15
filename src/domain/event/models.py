@@ -14,6 +14,29 @@ TIPOS_EVENTO_VALIDOS = frozenset(
         # projeto - nenhuma regra emite este tipo ainda.
         "FECHAMENTO_CONFIRMADO",
         "MUDANCA_CATEGORIA",
+        # entity_type="obra" (Radar Imobiliário, checkpoint 11) - fonte
+        # confirmada no checkpoint 11a (relatório mensal Alvará/CVCO da
+        # SMU). ALVARA_APROVADO e OBRA_CONCLUIDA nunca são somados numa
+        # métrica única de "atividade construtiva" - respondem perguntas
+        # diferentes ("onde vai mudar" vs. "onde já mudou").
+        "ALVARA_APROVADO",
+        "OBRA_CONCLUIDA",
+        "ALVARA_DEMOLICAO",
+        # entity_type="territorio" - detecção de mudança de zoneamento por
+        # diff de data_versao/data_atualizacao entre execuções do conector
+        # geocuritiba_cadastro (campos confirmados no checkpoint 11a). A
+        # regra de detecção em si é trabalho de pipeline, não deste
+        # checkpoint - reservado como PRIMEIRA_OBSERVACAO/ABERTURA_CONFIRMADA
+        # já foram antes de o conector correspondente existir.
+        "ZONEAMENTO_ALTERADO",
+        # reservado, propositalmente não implementado (ver seção 8 do
+        # prompt de referência do Radar Imobiliário): LANCAMENTO depende de
+        # dado comercial/setorial restrito; TRANSACAO depende de ITBI, que
+        # Curitiba não publica. Nenhuma regra emite qualquer um dos dois -
+        # populá-los com um proxy seria o atalho que o resto do sistema
+        # recusa.
+        "LANCAMENTO",
+        "TRANSACAO",
     }
 )
 CONFIANCAS_VALIDAS = frozenset({"alta", "media", "baixa"})

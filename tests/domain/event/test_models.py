@@ -59,3 +59,33 @@ def test_fechamento_confirmado_e_um_tipo_valido_mas_reservado():
     kwargs["confianca"] = "alta"
     e = Evento(**kwargs)
     assert e.event_type == "FECHAMENTO_CONFIRMADO"
+
+
+@pytest.mark.parametrize(
+    "event_type", ["ALVARA_APROVADO", "OBRA_CONCLUIDA", "ALVARA_DEMOLICAO"]
+)
+def test_tipos_de_evento_de_obra_sao_validos(event_type):
+    kwargs = _base_kwargs()
+    kwargs["entity_type"] = "obra"
+    kwargs["event_type"] = event_type
+    kwargs["confianca"] = "alta"
+    e = Evento(**kwargs)
+    assert e.event_type == event_type
+
+
+def test_zoneamento_alterado_e_um_tipo_valido_mas_reservado():
+    kwargs = _base_kwargs()
+    kwargs["entity_type"] = "territorio"
+    kwargs["event_type"] = "ZONEAMENTO_ALTERADO"
+    kwargs["confianca"] = "alta"
+    e = Evento(**kwargs)
+    assert e.event_type == "ZONEAMENTO_ALTERADO"
+
+
+@pytest.mark.parametrize("event_type", ["LANCAMENTO", "TRANSACAO"])
+def test_lancamento_e_transacao_sao_validos_mas_reservados(event_type):
+    kwargs = _base_kwargs()
+    kwargs["event_type"] = event_type
+    kwargs["confianca"] = "baixa"
+    e = Evento(**kwargs)
+    assert e.event_type == event_type

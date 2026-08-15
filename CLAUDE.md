@@ -1076,6 +1076,162 @@ estão implementadas e rodando localmente; toda métrica em tela tem fórmula do
 adiado por decisão do dono, como documentado desde a fase 1 - tudo roda local
 (`uvicorn`/`next dev`).
 
+## Radar Imobiliário (fase seguinte, checkpoints 11a-11f próprios)
+
+Segundo produto do projeto - reaproveita `dim_territorio`/`entidade`/`observacao_entidade`/
+`fato_evento_territorial` sem alterá-los, adiciona schema/conectores novos. **Numeração de
+checkpoint reinicia em 11a-11f nesta fase, independente dos checkpoints "11a-11e" da fase de
+inteligência territorial do Radar de Comércio acima** - são duas sequências diferentes que só
+coincidem no rótulo; não confundir as duas ao procurar contexto.
+
+Regra não-negociável desta fase: quatro grandezas monetárias existem no mercado imobiliário
+(venal/avaliação/anúncio/transação) e nunca são intercambiáveis - nenhum campo genérico
+`valor`/`preco` é permitido em tabela, endpoint ou UI; todo valor monetário carrega
+`tipo_valor` e `fonte_id` (`src/domain/valuation/`).
+
+### Checkpoint 11a - Verificação de fontes: **concluído, com uma correção real registrada**
+
+`docs/fontes-imobiliario.md` documenta as três fontes (Relatório Mensal Alvará/CVCO da SMU,
+Planta Genérica de Valores/IPPUC, camada Edificação do GeoCuritiba). **A primeira passagem
+desta verificação concluiu, incorretamente, que duas das três fontes estavam bloqueadas** -
+erro de investigação, não da fonte, apontado pelo dono do projeto e corrigido antes de
+prosseguir:
+- O relatório da SMU (`www5.curitiba.pr.gov.br`) parecia fora do ar porque as duas primeiras
+  tentativas foram contra HTTPS/porta 443, que não responde nesse host (timeout) - a porta 80
+  responde normalmente. Confirmado ponta a ponta depois: o formulário aceita postback real
+  (`__VIEWSTATE`/`__VIEWSTATEGENERATOR`/`__EVENTVALIDATION`) e devolve um `.xls` (HTML/MSO) com
+  até 35 colunas por linha - **muito mais rico que o prompt de referência assumia**, incluindo
+  `Quantidade Pavimentos`, `Metragem Construída Lote`, `Número CVCO`/`Data Vistoria` no próprio
+  relatório de alvará, e `Indicação Fiscal`/`Inscrição Imobiliária` como chave direta de junção
+  com o Lote Cadastral do GeoCuritiba (sem geocodificação nenhuma).
+- A PGV (`Publico_GeoCuritiba_Planta_Generica_Valores/MapServer`) foi consultada na URL certa
+  desde o início, mas a primeira passagem só leu a lista de layers do `MapServer` raiz (que não
+  mostra campos) e concluiu, por suposição a partir dos nomes, que nenhuma tinha valor
+  monetário. A layer 0 ("Microrregião (PGV 2025)") na verdade tem o campo `vukt` (Valor
+  Unitário Característico de Terreno, R$/m²) - 1.062 polígonos, sem autenticação, CRS correto
+  (`wkid 31982`, igual a todo o resto do GeoCuritiba). Um shapefile legado
+  (`ippuc.org.br/geodownloads/SHAPES/PGV.zip`, 300k pontos por lote) também existe mas está
+  parado em 2017 e sem CRS identificável - documentado como achado à parte, não usado.
+- A camada "Edificação" (layer 23 do `MapaCadastral`) de fato não existe - confirmado
+  consultando o serviço inteiro (41 layers reais, sem esse nome). "Lote Cadastral" (id 15,
+  308.882 feições) e "Zoneamento Lei 15.511/2019" (id 36, 223 feições) existem exatamente como
+  o prompt de referência esperava, campos batendo 1:1.
+
+Lição registrada para não repetir: **distinguir "meu método de verificação falhou" de "a fonte
+não existe"** antes de reportar um bloqueio - checar porta/protocolo alternativo e o schema de
+campo por layer (não só a lista de layers), antes de concluir que uma fonte pública está fora
+do ar ou incompleta.
+
+### Checkpoint 11b - Domínio e modelo: **concluído**
+
+- `src/domain/valuation/` - `ValorMonetario` (a regra pura das quatro grandezas:
+  `tipo_valor`/`componente`/`fonte_id` obrigatórios, valida contra listas fechadas) e
+  `ValorReferenciaTerritorial` (o registro completo, pronto pra persistir - geometria,
+  vigência, proveniência). `media_valor_m2`/`mediana_valor_m2` recusam misturar `tipo_valor`
+  OU `componente` diferentes no mesmo agregado (o teste que a seção 1 do prompt de referência
+  pede explicitamente). 23 testes.
+- Catálogo de eventos (`domain/event/models.py`) ganhou `ALVARA_APROVADO`, `OBRA_CONCLUIDA`,
+  `ALVARA_DEMOLICAO` (entity_type="obra", fonte confirmada no 11a) e `ZONEAMENTO_ALTERADO`
+  (entity_type="territorio", reservado - a regra de detecção por diff de `data_versao` é
+  trabalho de pipeline, não deste checkpoint). `LANCAMENTO`/`TRANSACAO` também entraram, **só
+  como reservados** (mesmo padrão de `FECHAMENTO_CONFIRMADO` já existente) - nenhuma regra os
+  emite, por decisão explícita do prompt de referência (sem fonte pública confiável pra
+  nenhum dos dois em Curitiba).
+- `canonical.valor_referencia_territorial` e `canonical.zoneamento_territorial`
+  (migração `61a2467444fb`) + `canonical.lote_cadastral` (migração `19b351ae137c`, criada
+  durante o 11c como suporte de junção, não estava na seção 3 do prompt mas é necessária pra
+  resolver território/zoneamento por Indicação Fiscal sem geocodificar). `fonte_id` é texto
+  livre sem FK pra uma `dim_fonte` (o prompt de referência sugeria essa FK, mas nenhuma tabela
+  do projeto até hoje tem `dim_fonte` - desvio deliberado, documentado no ORM, pra não
+  introduzir uma abstração nova sem nenhum outro uso).
+- **Achado real, corrigido antes de rodar contra dado de verdade**: a primeira versão da
+  constraint de idempotência de `valor_referencia_territorial` usava
+  `(territorio_id, tipo_valor, componente, fonte_id, vigencia_inicio)` - colapsava todas as
+  microrregiões de um mesmo bairro numa única linha (um bairro comum tem várias microrregiões
+  da PGV, cada uma com seu próprio `vukt`). Corrigido trocando pra
+  `(objectid_fonte, fonte_id, vigencia_inicio)` - a identidade do registro na fonte, não o
+  território derivado. Sem essa correção, rodar `ippuc_pgv` real gravava 74 linhas em vez de
+  1.011 (achado rodando contra dado real do 11c, não pego pelos testes unitários - nenhum
+  teste tinha duas geometrias do mesmo bairro).
+- Reaproveitamento: `src/infrastructure/connectors/geocuritiba_bairro/geometry.py` (reprojeção
+  EPSG:31982→4326 + conversão de anéis Esri) foi movido para
+  `src/infrastructure/connectors/geometry.py` (compartilhado) - checkpoint 11c precisava dele
+  em três conectores novos, mesmo padrão de reuso já estabelecido pra `text.py`/`slugify`.
+- **Migração rodada contra o Postgres real**: `alembic upgrade head` limpo, `alembic check` sem
+  drift novo (só o índice pré-existente já documentado desde o checkpoint 9a), índices GIST
+  espaciais confirmados autogerados, `CHECK` de `tipo_valor` testado rejeitando um valor
+  inválido de verdade. Total do projeto: 216 testes (antes de somar os testes de conector do
+  11c) passando.
+
+### Checkpoint 11c - Conectores do núcleo: **concluído, rodado contra as três fontes reais**
+
+Três conectores, todos seguindo o contrato `fetch()/normalize()` já estabelecido, com desvio
+documentado de assinatura igual ao já usado em `alvaras_smf` (parâmetros extras em
+`normalize()` pra passar lookup de território, resolvido pela orquestração, não dentro do
+conector).
+
+- **`ippuc_pgv`** (`src/infrastructure/connectors/ippuc_pgv/`) - layer "Microrregião (PGV
+  2025)". Vigência (`vigencia_inicio`/`moeda_data`) extraída do nome da layer via regex (não
+  há campo de data por feição na fonte - achado do 11a) - se a IPPUC renomear pra "PGV 2026"
+  no futuro, o conector acompanha sozinho, com aviso de log se o padrão não bater. **Rodado
+  contra a API real**: 1.062 feições, 1.011 normalizadas (51 ignoradas - código `UC-*`, áreas
+  de conservação sem VUKT atribuído, achado plausível não é bug), **100% resolvido contra
+  `dim_territorio`**, 74 bairros distintos cobertos. `componente='terreno'` só, como já
+  documentado no 11a.
+- **`geocuritiba_cadastro`** (`src/infrastructure/connectors/geocuritiba_cadastro/`) - duas
+  classes: `LoteCadastralConnector` (layer 15, ~308 mil feições - `fetch()`/`normalize()` em
+  streaming via JSONL em disco, mesma disciplina de memória de `alvaras_smf`, nunca carrega o
+  dataset inteiro) e `ZoneamentoConnector` (layer 36, 223 feições, sem essa necessidade de
+  streaming). Zoneamento não resolve `territorio_id` (a camada não carrega nome de bairro por
+  feição - resolver exigiria join espacial, fora de escopo). Quadra Cadastral **não** foi
+  buscada - decisão de escopo (nenhuma tabela do checkpoint precisa dela; Lote Cadastral já
+  carrega bairro/zoneamento direto por lote). **Rodado contra a API real**: 308.882 lotes
+  gravados (upsert por `objectid_fonte`, só 1 bairro sem correspondência -
+  "CIDADE INDUSTRIAL", mesma variação de grafia já registrada no checkpoint 2), 223
+  zoneamentos gravados.
+- **`smu_alvaras_construcao`** (`src/infrastructure/connectors/smu_alvaras_construcao/`) - duas
+  classes finas (`AlvaraConstrucaoConnector`/`CvcoConnector`, `rblRelacao=1`/`2`) sobre uma
+  base comum que replica o postback ASP.NET e faz o parsing do HTML/MSO por posição de coluna
+  (`parsing.py`, `COLUNAS` - 34 no relatório de alvará, 35 no de CVCO). `tipo_entidade="obra"`,
+  `identificador_fonte="Número Alvará"` - mesmo padrão de `Entidade`/`ObservacaoEntidade` do
+  comércio (princípio 6), nenhum atalho.
+  - **Achado real, corrigido rodando contra dado de verdade**: a primeira execução resolveu
+    **0%** de território - a Indicação Fiscal do relatório da SMU vem com pontos
+    (`"12.006.027"`), a de `lote_cadastral` (GeoCuritiba) vem só com dígitos (`"12006027"`).
+    Sem essa normalização, a chave de junção nunca batia, apesar de ser logicamente a mesma
+    informação. Corrigido com `normalizar_indicacao_fiscal()` (remove tudo que não é dígito)
+    aplicado nos dois lados do lookup. Depois da correção: **90,7%** de território resolvido no
+    relatório de alvará, **91,6%** no de CVCO - contra dado real de jan-jul/2026.
+  - **Decisão de arquitetura, motivada por um bug real evitado antes de rodar**: a primeira
+    versão do pipeline detectava evento (`ALVARA_APROVADO`/`OBRA_CONCLUIDA`) na mesma
+    passagem que gravava a observação, usando o objeto de domínio recém-criado em memória.
+    Isso quebra numa condição real: se a observação já existisse (reprocessamento do mesmo
+    mês), o `INSERT` é ignorado (idempotência via `ON CONFLICT DO NOTHING`), mas o objeto em
+    memória teria um `observacao_id` novo, nunca persistido - o evento apontaria
+    (`origem_observacoes`) pra um id inexistente no banco. Corrigido separando em dois
+    estágios, replicando o padrão já estabelecido pelo comércio
+    (`pipelines/ingestion/run_alvaras_smf.py` só ingere; `pipelines/event_detection/
+    run_comercio.py` detecta evento lendo de volta do banco): `pipelines/ingestion/
+    run_smu_alvaras_construcao.py` (só fetch→normalize→grava entidade/observação) e
+    `pipelines/event_detection/run_obra.py` (novo - lê observação de volta via
+    `observacao_repository.iter_observacoes_por_fonte`, nova função de leitura em cursor
+    server-side, e chama `domain.event.detectar_evento_obra`). `detectar_evento_obra` é regra
+    pura nova (`domain/event/regras.py`) - diferente de `detectar_eventos_par` (comércio, que
+    compara duas observações), deriva o evento de uma única observação porque a fonte já
+    informa a data exata do fato (`Data Criação Alvará`/`Data Vistoria`), sem precisar de
+    inferência por ausência/presença entre snapshots.
+  - **Rodado contra a API real** (jan-jul/2026): 2.214 alvarás de construção, 1.373 CVCOs
+    (1.392 lidos, 19 duplicados na mesma referência mensal, mesmo padrão de idempotência das
+    outras fontes). 2.214 eventos `ALVARA_APROVADO` e 1.373 `OBRA_CONCLUIDA` gravados, **todos
+    com data resolvida** (0 sem data relevante). Confirmada idempotência: rodar a ingestão e a
+    detecção de evento uma segunda vez contra o mesmo período grava 0 observações e 0 eventos
+    novos.
+- **Rodado contra o banco/fontes reais**: 236 testes Python passando (todos os conectores
+  testados com sessão HTTP falsa, sem depender de rede em CI). `alembic check` sem drift novo.
+
+**Checkpoints 11d (conectores de contexto: BCB/QuintoAndar/Censo), 11e (features + API) e 11f
+(frontend) ainda não iniciados.**
+
 ## Notas operacionais
 
 - Ambiente Python único disponível na máquina é 3.14 (via `py -0p`); todas as dependências
