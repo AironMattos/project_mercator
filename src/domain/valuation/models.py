@@ -101,3 +101,71 @@ class ValorReferenciaTerritorial:
             raise ValueError("valor_m2 não pode ser negativo")
         if self.geometria is None or self.geometria.is_empty:
             raise ValueError("geometria não pode ser vazia")
+
+
+CATEGORIAS_INDICADOR_BCB_VALIDAS = frozenset({"valor", "area", "contagem"})
+
+
+@dataclass(frozen=True)
+class IndicadorMercadoImobiliarioUf:
+    """Uma leitura mensal de uma série do serviço MercadoImobiliario do
+    BCB (checkpoint 11d), granularidade UF - nunca confundir com dado de
+    Curitiba. A fonte publica 14 séries sob o mesmo formato genérico
+    (Data/Info/Valor), cobrindo três naturezas de número diferentes -
+    daqui a necessidade de categoria, para nunca somar uma contagem com
+    um valor monetário:
+
+    - categoria='valor': mediana em R$ de imóveis ADQUIRIDOS via
+      financiamento reportado ao SCR (fonte ACNV1501, confirmado na
+      Metodologia.pdf oficial do BCB) - 'imoveis_valor_avaliacao'
+      (avaliação do banco) e 'imoveis_valor_compra'. 'valor_compra' é o
+      preço efetivamente contratado na aquisição, não uma segunda
+      avaliação - por isso mapeado para tipo_valor='transacao', não
+      'avaliacao' (ver domain/valuation.TIPOS_VALOR_VALIDOS). Viés de
+      amostra explícito: só cobre imóveis financiados via alienação
+      fiduciária/hipoteca reportados ao SCR, não todas as transações do
+      estado - nunca apresentar como preço de mercado do Paraná inteiro.
+    - categoria='area': mediana em m² ('imoveis_area_privativa',
+      'imoveis_area_total') - não monetário.
+    - categoria='contagem': número de imóveis adquiridos no mês
+      classificados por tipo/dormitórios/implantação/garantia - não
+      monetário, não confundir com volume de mercado (é volume só da
+      fatia financiada via SCR).
+
+    tipo_valor só é preenchido quando categoria='valor' - reaproveita a
+    mesma validação de TIPOS_VALOR_VALIDOS de ValorMonetario, para que a
+    regra das quatro grandezas monetárias valha aqui também."""
+
+    uf: str
+    periodo_referencia: date
+    indicador: str
+    categoria: str
+    unidade: str
+    leitura: float
+    fonte_id: str
+    snapshot_ref: str
+    tipo_valor: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.uf:
+            raise ValueError("uf não pode ser vazia")
+        if self.categoria not in CATEGORIAS_INDICADOR_BCB_VALIDAS:
+            raise ValueError(
+                f"categoria inválida: {self.categoria!r}. "
+                f"Deve ser uma de {sorted(CATEGORIAS_INDICADOR_BCB_VALIDAS)}"
+            )
+        if self.categoria == "valor":
+            if self.tipo_valor not in TIPOS_VALOR_VALIDOS:
+                raise ValueError(
+                    f"categoria='valor' exige tipo_valor válido, recebido "
+                    f"{self.tipo_valor!r}"
+                )
+        elif self.tipo_valor is not None:
+            raise ValueError(
+                f"tipo_valor só se aplica a categoria='valor', não a "
+                f"categoria={self.categoria!r}"
+            )
+        if not self.unidade:
+            raise ValueError("unidade não pode ser vazia")
+        if not self.fonte_id:
+            raise ValueError("fonte_id não pode ser vazio")

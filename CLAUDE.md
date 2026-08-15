@@ -1229,8 +1229,79 @@ conector).
 - **Rodado contra o banco/fontes reais**: 236 testes Python passando (todos os conectores
   testados com sessão HTTP falsa, sem depender de rede em CI). `alembic check` sem drift novo.
 
-**Checkpoints 11d (conectores de contexto: BCB/QuintoAndar/Censo), 11e (features + API) e 11f
-(frontend) ainda não iniciados.**
+### Checkpoint 11d - Conectores de contexto: **concluído, rodado contra as três fontes reais**
+
+Três conectores de contexto de mercado/demografia (BCB, QuintoAndar, IBGE), granularidades
+diferentes e explícitas em cada schema - nenhum reaproveita `valor_referencia_territorial`
+(esse é território com geometria; os três daqui são UF/cidade/setor, sem geometria nesta
+fase). Verificação de fonte feita antes do código, mesma disciplina do checkpoint 11a -
+resultado completo em `docs/fontes-imobiliario.md` (seção "Checkpoint 11d").
+
+- **`bcb_mercado_imobiliario`** (`src/infrastructure/connectors/bcb_mercado_imobiliario/`) -
+  serviço OData `MercadoImobiliario` do BCB, licença ODbL. **Achado que mudou o desenho**: o
+  serviço não é uma tabela de mercado imobiliário estruturada - é uma tabela genérica de
+  milhares de séries de crédito (`Data`/`Info`/`Valor`), e o "catálogo" de séries relevantes
+  não é descobrível por consulta exploratória (listagem de `Info` distintos não é exaustiva).
+  As 14 séries reais de imóveis vieram da Metodologia.pdf oficial do BCB, não de tentativa e
+  erro contra o serviço. Cada série tem granularidade UF (sufixo `_pr` para Paraná) - **nunca
+  rotular como Curitiba**. `domain.valuation.IndicadorMercadoImobiliarioUf` (novo, reaproveita
+  `TIPOS_VALOR_VALIDOS`) distingue três naturezas de número na mesma fonte via `categoria`
+  (`valor`/`area`/`contagem`) - nunca somar uma contagem de imóveis com um valor monetário.
+  **Achado de metodologia**: `imoveis_valor_compra` não é uma segunda avaliação - a
+  Metodologia.pdf descreve como "a mediana do valor dos imóveis **adquiridos** ... classificada
+  em avaliação ou compra" (fonte ACNV1501/SCR) - "compra" é o preço efetivamente contratado,
+  por isso mapeado para `tipo_valor='transacao'`, não `'avaliacao'`. Viés de amostra explícito
+  (só financiamento via SCR) documentado no código e nos dados - nunca apresentar como preço de
+  mercado do Paraná inteiro. **Achado técnico, corrigido rodando contra a API real**: `requests`
+  codifica espaço como `+` no dict `params=`, e o parser OData do BCB trata `+` como operador de
+  adição (erro real: `"types 'Edm.Boolean' and 'Edm.String' are not compatible"`) - corrigido
+  montando a query com `%20` direto na URL, sem usar `params=`.
+- **`quintoandar_aluguel`** (`src/infrastructure/connectors/quintoandar_aluguel/`) - CSV
+  público (`publicfiles.data.quintoandar.com.br`), filtrado para `city_name='cur'` (Curitiba,
+  confirmado entre os 6 códigos de cidade do arquivo). `domain.contexto.IndicadorAluguelMercado`
+  (novo pacote `domain/contexto/`, deliberadamente fora de `domain/valuation` - aluguel não é
+  uma das quatro grandezas de compra, nunca rotulado com `tipo_valor`). **Duas afirmações do
+  prompt de referência corrigidas por achado real** (não erro do prompt, divergência real):
+  a metodologia oficial descreve o índice como misturando anúncios E contratos fechados, não só
+  "contratos reais"; a periodicidade real do CSV é mensal (não trimestral - os relatórios em
+  PDF trimestrais são um resumo, o dado bruto é mês a mês). `est_price` tratado como R$/m²/mês
+  por inferência de magnitude (cruzado contra preço de venda de `relatorio_cv.csv`), não por
+  confirmação textual explícita - documentado como tal.
+- **`ibge_censo_setor`** (`src/infrastructure/connectors/ibge_censo_setor/`) - arquivo "básico"
+  (V0001-V0009: população, domicílios por tipo) dos Agregados por Setores Censitários do Censo
+  2022, resolvido dinamicamente por regex sobre a listagem (nome do arquivo carrega uma data
+  que muda a cada publicação do IBGE, mesmo padrão de `alvaras_smf._arquivo_mais_recente`).
+  **Achado que simplificou o desenho original**: o arquivo já carrega `NM_BAIRRO` por setor -
+  não precisa de join espacial com `dim_territorio` (o prompt de referência original previa
+  precisar). `domain.contexto.IndicadorCensitarioSetor` resolve `territorio_id` por slug do
+  nome do bairro, mesmo padrão de `ippuc_pgv`/`geocuritiba_cadastro`. **Achado que confirma uma
+  ressalva do próprio prompt**: o dicionário de dados oficial não tem nenhuma variável de
+  condição de ocupação (própria/alugada) nem valor de aluguel nos resultados do universo -
+  são variáveis de amostra, publicadas em outro momento pelo IBGE (o prompt já suspeitava disso
+  para aluguel; o achado real é que nem condição de ocupação está disponível).
+- `src/infrastructure/database/orm/contexto_bcb_imobiliario.py`,
+  `contexto_quintoandar_aluguel.py`, `contexto_censo_setor.py` +
+  `repositories/contexto_bcb_repository.py`, `contexto_quintoandar_repository.py`
+  (idempotência por chave natural, `ON CONFLICT DO NOTHING` - mesma disciplina de
+  `observacao_entidade`), `contexto_censo_repository.py` (upsert por `setor_censitario`, fonte
+  estática). Migração `fa260fcdf01b` cria as três tabelas.
+- `src/pipelines/ingestion/run_bcb_mercado_imobiliario.py`, `run_quintoandar_aluguel.py`,
+  `run_ibge_censo_setor.py` - mesmo padrão fetch→normalize→grava→`pipeline_run` dos conectores
+  anteriores.
+- **Rodado contra as três fontes reais**: BCB - 14 séries × ~100 meses = **1.400 leituras**
+  gravadas (uf=PR, desde 2018-01). QuintoAndar - 1.708 linhas totais no CSV, 229 de Curitiba,
+  **221 leituras gravadas** (8 ficam de fora - meses iniciais da série sem amostra suficiente,
+  vêm vazios na própria fonte). IBGE - **3.190 setores censitários de Curitiba gravados**,
+  **99,3% (3.169) com bairro resolvido** (só "Botiatuvinha", grafia do IBGE, não casa com
+  "BUTIATUVINHA" oficial - mesma classe de variação de grafia já documentada em outros
+  checkpoints).
+- 35 testes novos (`tests/domain/valuation/` ampliado, `tests/domain/contexto/` novo,
+  `tests/infrastructure/connectors/bcb_mercado_imobiliario/`, `quintoandar_aluguel/`,
+  `ibge_censo_setor/` - sessão HTTP falsa em todos, sem depender de rede em CI). `alembic check`
+  sem drift novo (só o índice pré-existente já documentado desde o checkpoint 8). Total do
+  projeto: **271 testes Python passando**.
+
+**Checkpoints 11e (features + API) e 11f (frontend) ainda não iniciados.**
 
 ## Notas operacionais
 

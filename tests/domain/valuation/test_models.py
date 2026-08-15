@@ -3,7 +3,11 @@ from datetime import date
 import pytest
 from shapely.geometry import Point, Polygon
 
-from domain.valuation import ValorMonetario, ValorReferenciaTerritorial
+from domain.valuation import (
+    IndicadorMercadoImobiliarioUf,
+    ValorMonetario,
+    ValorReferenciaTerritorial,
+)
 
 
 def _base_kwargs():
@@ -92,3 +96,62 @@ def test_valor_referencia_territorial_geometria_vazia_rejeitada():
     kwargs["geometria"] = Polygon()
     with pytest.raises(ValueError):
         ValorReferenciaTerritorial(**kwargs)
+
+
+def _base_kwargs_indicador_bcb():
+    return dict(
+        uf="PR",
+        periodo_referencia=date(2026, 4, 1),
+        indicador="imoveis_valor_avaliacao",
+        categoria="valor",
+        tipo_valor="avaliacao",
+        unidade="R$",
+        leitura=300000.0,
+        fonte_id="bcb_mercado_imobiliario",
+        snapshot_ref="teste",
+    )
+
+
+def test_indicador_bcb_categoria_valor_com_tipo_valor_e_aceito():
+    i = IndicadorMercadoImobiliarioUf(**_base_kwargs_indicador_bcb())
+    assert i.tipo_valor == "avaliacao"
+
+
+def test_indicador_bcb_categoria_valor_sem_tipo_valor_rejeitado():
+    kwargs = _base_kwargs_indicador_bcb()
+    kwargs["tipo_valor"] = None
+    with pytest.raises(ValueError):
+        IndicadorMercadoImobiliarioUf(**kwargs)
+
+
+def test_indicador_bcb_categoria_contagem_com_tipo_valor_rejeitado():
+    kwargs = _base_kwargs_indicador_bcb()
+    kwargs["categoria"] = "contagem"
+    kwargs["unidade"] = "imóveis"
+    # tipo_valor continua setado (herdado do base kwargs) - deve ser
+    # rejeitado porque só categoria='valor' pode carregar tipo_valor.
+    with pytest.raises(ValueError):
+        IndicadorMercadoImobiliarioUf(**kwargs)
+
+
+def test_indicador_bcb_categoria_contagem_sem_tipo_valor_e_aceito():
+    kwargs = _base_kwargs_indicador_bcb()
+    kwargs["categoria"] = "contagem"
+    kwargs["unidade"] = "imóveis"
+    kwargs["tipo_valor"] = None
+    i = IndicadorMercadoImobiliarioUf(**kwargs)
+    assert i.tipo_valor is None
+
+
+def test_indicador_bcb_categoria_invalida_rejeitada():
+    kwargs = _base_kwargs_indicador_bcb()
+    kwargs["categoria"] = "preco"
+    with pytest.raises(ValueError):
+        IndicadorMercadoImobiliarioUf(**kwargs)
+
+
+def test_indicador_bcb_uf_vazia_rejeitada():
+    kwargs = _base_kwargs_indicador_bcb()
+    kwargs["uf"] = ""
+    with pytest.raises(ValueError):
+        IndicadorMercadoImobiliarioUf(**kwargs)

@@ -263,3 +263,148 @@ Nenhuma das três fontes está bloqueada. Os ajustes de desenho, todos favoráve
 
 Seguindo para o checkpoint 11b completo, depois 11c com os três conectores do núcleo, conforme
 direcionado.
+
+---
+
+## Checkpoint 11d — Verificação das fontes de contexto (BCB, QuintoAndar, IBGE)
+
+Data da verificação: 2026-08-15. Método: consulta direta aos endpoints reais (BCB OData,
+CSVs públicos da QuintoAndar, FTP do IBGE), incluindo leitura da Metodologia.pdf oficial do
+BCB e do dicionário de dados oficial do Censo 2022 - nenhuma suposição a partir só de nome de
+campo, mesma disciplina do checkpoint 11a. Nenhuma das três fontes está bloqueada; as três
+divergem em algum grau do que o prompt de referência assumia, sempre para um desenho mais
+simples ou mais rico do que o previsto, nunca um bloqueio.
+
+### 1. BCB - serviço MercadoImobiliario (OData)
+
+**URL real**: `https://olinda.bcb.gov.br/olinda/servico/MercadoImobiliario/versao/v1/odata/mercadoimobiliario`.
+Licença **ODbL**, confirmada em `dadosabertos.bcb.gov.br` - bate com o que o prompt de
+referência previa.
+
+**O serviço não é uma tabela de mercado imobiliário estruturada** - é uma tabela genérica de
+três colunas (`Data`, `Info`, `Valor`) que mistura **milhares** de séries temporais de crédito
+em geral (`credito_estoque_...`, `direcionamento_aplicacao_...`, `contabil_...`), identificadas
+só por um slug de texto em `Info`. Descobrir o "catálogo" de séries relevantes por consulta
+exploratória ao próprio serviço é inviável (a listagem de valores distintos de `Info` não é
+exaustiva nem alfabética de forma confiável - confirmado comparando duas consultas diferentes
+que erraram a lista uma da outra). A lista definitiva veio de
+`https://www.bcb.gov.br/content/estatisticas/mercadoimobiliario_docs/Metodologia.pdf`
+(linkada a partir da página do dataset), seção "Imóveis": **14 séries reais**, cada uma com
+sufixo de UF (`_pr` para Paraná) - `imoveis_tipo_apartamento`/`_casa`,
+`imoveis_dormitorio_1`/`_2`/`_3`/`_4_mais`, `imoveis_area_privativa`/`_total`,
+`imoveis_implantacao_condominio`/`_isolado`, `imoveis_valor_avaliacao`/`_compra`,
+`imoveis_garantia_hipoteca`/`_alienacao_fiduciaria`. Todas mensais, histórico real desde
+2018-01 (confirmado por query real, não documentado explicitamente na fonte).
+
+**Achado que mudou o desenho do checkpoint 11b/11d**: a Metodologia.pdf descreve a série
+"Valor" como *"a mediana do valor dos imóveis **adquiridos** na data-base classificada em
+avaliação ou compra"*, fonte `ACNV1501` (SCR - Sistema de Informações de Crédito). Ou seja,
+`imoveis_valor_compra` não é uma segunda leitura de avaliação - é **o preço efetivamente
+contratado na aquisição**, a mesma noção de "o que foi pago" que `tipo_valor='transacao'`
+representa em `domain.valuation`. Mapeado como tal (`imoveis_valor_avaliacao` →
+`tipo_valor='avaliacao'`, `imoveis_valor_compra` → `tipo_valor='transacao'`) - **não confundir
+com preço de mercado do Paraná inteiro**: viés de amostra explícito, cobre só imóveis
+financiados via alienação fiduciária/hipoteca reportados ao SCR, não toda transação do estado.
+Isso não preenche a lacuna de "preço de transação intramunicipal" documentada no checkpoint
+11a (o dado é UF, não Curitiba) - é um achado complementar, não uma correção daquela conclusão.
+
+**Achado técnico, corrigido rodando contra a API real**: `requests` codifica espaço como `+`
+quando o filtro é passado via `params=`; o parser OData do BCB interpreta `+` como operador de
+adição, não espaço (erro real observado: `"types 'Edm.Boolean' and 'Edm.String' are not
+compatible"`, porque `Info+eq+'x'` virava `Info + eq + 'x'`). Corrigido montando a query já
+codificada (`%20`) direto na URL, sem usar `params=`.
+
+**Rodado contra a API real**: 14 séries × ~100 meses = **1.400 leituras gravadas**.
+
+### 2. QuintoAndar/Imovelweb - Índice de Aluguel (CSV público)
+
+**URL real**: `https://publicfiles.data.quintoandar.com.br/indice_quintoandar_imovelweb/index_quintoandar_imovelweb_serie.csv`.
+Achada em `mkt.quintoandar.com.br/dados/` (a URL que o prompt de referência citava, que
+redireciona para essa página). Sem licença explícita encontrada na página nem no CSV - mesma
+lacuna já registrada para as fontes do checkpoint 11a.
+
+**Duas afirmações do prompt de referência não se confirmaram** (achado, não erro do prompt -
+registrado por transparência, mesmo espírito do checkpoint 11a):
+- **Não é "calculado sobre contratos reais, não anúncios"**: a metodologia oficial
+  (`quintoandar.com.br/newsroom/metodologia-do-indice-de-aluguel-quintoandar-imovelweb/`) diz
+  explicitamente *"O Índice avalia a evolução mensal dos preços tanto de anúncios como de
+  contratos de aluguel"* - é uma mistura hedônica dos dois, não só contratos fechados.
+- **Periodicidade real é mensal, não trimestral**: o CSV tem uma linha por mês
+  (`ts_date`), de 2019-03 a 2025-08 (o material de imprensa fala em "2º Trimestre 2025" porque
+  os relatórios em PDF são trimestrais, mas o dado bruto do CSV é mensal).
+
+**Estrutura confirmada**: colunas `ts_date,city_name,house_room,est_price,chg,acum12m`.
+`city_name` usa códigos de 3 letras - `cur` é **Curitiba**, confirmado (junto com `bhe`, `bsb`,
+`poa`, `rio`, `spo`). `house_room` é `city` (agregado) ou `1`/`2`/`3` (dormitórios) - sem
+segmento "4+". `est_price` **inferido** como R$/m²/mês (não documentado em texto explícito em
+nenhuma fonte pública encontrada) - magnitude conferida cruzando com `relatorio_cv.csv`
+(preço de venda por m², mesma família de arquivos): os valores de aluguel (~R$19-65/m²/mês)
+são consistentes com um retorno de aluguel residencial de 4-8%/ano sobre os preços de venda
+observados (~R$4.700-8.300/m²) - confiança alta, não confirmação textual. `relatorio_cv.csv`
+(compra e venda) **não cobre Curitiba** (só BH/RJ/SP) - não usado neste checkpoint.
+
+**Rodado contra o CSV real**: 1.708 linhas totais, 229 de Curitiba, **221 leituras gravadas**
+(8 ficam de fora - meses iniciais da série real, antes de `est_price` ter amostra suficiente,
+vêm vazios no próprio CSV da fonte).
+
+### 3. IBGE - Censo Demográfico 2022, Agregados por Setores Censitários
+
+**URL real de listagem**: `https://ftp.ibge.gov.br/Censos/Censo_Demografico_2022/Agregados_por_Setores_Censitarios/`.
+**Achado de investigação**: essa URL raiz serve uma página wrapper ("Downloads | Estatísticas")
+que não é uma listagem Apache simples - `curl` direto na raiz não mostra os arquivos (mesma
+classe de erro documentada no checkpoint 11a: "meu método de verificação falhou" não é "o
+arquivo não existe"). Os links reais estavam no meio do HTML da página (não no topo/rodapé, por
+isso passaram despercebidos numa primeira leitura truncada) - `grep -oE 'href="[^"]*"'` na
+página inteira revelou as subpastas reais:
+`Agregados_por_Bairro_csv/`, `Agregados_por_Setor_csv/`, `Agregados_por_Municipio_csv/`,
+`Agregados_por_Distrito_csv/`, `Agregados_por_SubDistrito_csv/` (+ equivalentes `_xlsx`), e o
+dicionário `dicionario_de_dados_agregados_por_setores_censitarios_20260520.xlsx`.
+
+**Achado que simplificou o desenho**: o arquivo "básico" por setor
+(`Agregados_por_setores_basico_BR_<data>.zip`, resolvido dinamicamente via regex sobre a
+listagem - o prompt de referência original previa precisar de join espacial entre setor e
+bairro, mas **o arquivo já carrega `NM_BAIRRO`/`CD_BAIRRO` por setor** - confirmado contra
+dado real: 3.190 setores em Curitiba, **exatamente 75 bairros distintos**, casando por slug
+contra `dim_territorio` em **74/75 (98,7%)** - só "Botiatuvinha" (grafia do IBGE) não bate
+contra "BUTIATUVINHA" (grafia oficial de Curitiba/IPPUC), mesma classe de variação de grafia já
+documentada em bairro/alvará (checkpoint 2) e bairro/PGV (checkpoint 11c). Existe também uma
+malha "Agregados_por_Bairro" pronta na mesma pasta - não usada aqui porque o checkpoint pede
+setor censitário explicitamente (para sustentar a métrica de densidade construtiva do
+checkpoint 11e, que precisa da granularidade fina), mas registrado como alternativa mais simples
+se o produto decidir não precisar dessa granularidade no futuro.
+
+**Achado que confirma uma ressalva do próprio prompt de referência**: o dicionário de dados
+oficial (`Dicionário não PCT`, 1.412 variáveis) **não tem nenhuma variável de condição de
+ocupação (própria/alugada/cedida) nem de valor de aluguel** nos resultados do universo -
+confirmado varrendo as descrições completas dos temas "Características do Domicílio" (partes
+1-3, 543 variáveis no total; cobrem tipo de domicílio, abastecimento de água, esgoto, coleta de
+lixo, banheiros, cor/raça e sexo do responsável, nada de tenure). Essas variáveis são de amostra
+(pesquisa probabilística), publicadas separadamente pelo IBGE em momento futuro, não junto do
+resultado do universo usado aqui - o prompt de referência já antecipava essa possibilidade
+("valor de aluguel provavelmente não, por ser variável de amostra"); o achado real é que nem
+"condição de ocupação" (que o prompt achava provável) está disponível.
+
+**Arquivo usado**: só o "básico" (V0001-V0009: população total, domicílios por tipo -
+particulares permanentes ocupados/vagos, improvisados, coletivos, média de moradores). Os três
+arquivos de "Características do Domicílio" (24-84MB cada, BR inteiro) existem e foram
+localizados, mas não baixados neste checkpoint - não há métrica prevista para 11d/11e que
+precise deles ainda; documentado aqui para não precisar ser redescoberto.
+
+**Rodado contra o arquivo real**: 3.190 setores de Curitiba, **99,3% (3.169) com bairro
+resolvido**, **3.190 setores gravados** no banco.
+
+### O que isso muda no desenho
+
+Nenhuma das três fontes bloqueou o checkpoint. Ajustes de desenho, todos documentados no
+código (`domain/valuation.IndicadorMercadoImobiliarioUf`, `domain/contexto.*`):
+
+- BCB não tem granularidade de Curitiba (nem o prompt de referência esperava isso) - rotular
+  sempre "Paraná" na UI, nunca implicar cidade.
+- `imoveis_valor_compra` do BCB é tratado como `tipo_valor='transacao'` (achado, não estava no
+  prompt de referência) - com o viés de amostra (só financiamento via SCR) explícito em
+  qualquer lugar que exibir esse número.
+- QuintoAndar: usar só `cur` (Curitiba); tratar `est_price` como R$/m²/mês com confiança alta,
+  não como fato confirmado por texto oficial.
+- Censo: setor→bairro por nome (sem join espacial), sem condição de ocupação/aluguel
+  disponível - "densidade construtiva" (métrica 6, checkpoint 11e) usa domicílios/população por
+  setor, nunca inventa uma proxy de tenure que a fonte não tem.

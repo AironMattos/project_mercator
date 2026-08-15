@@ -24,6 +24,9 @@ from infrastructure.database.orm import geolocalizacao_entidade  # noqa: F401
 from infrastructure.database.orm import valor_referencia_territorial  # noqa: F401
 from infrastructure.database.orm import zoneamento_territorial  # noqa: F401
 from infrastructure.database.orm import lote_cadastral  # noqa: F401
+from infrastructure.database.orm import contexto_bcb_imobiliario  # noqa: F401
+from infrastructure.database.orm import contexto_quintoandar_aluguel  # noqa: F401
+from infrastructure.database.orm import contexto_censo_setor  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
