@@ -615,6 +615,314 @@ type QualidadeDadosApi = {
   ultima_atualizacao: string | null;
 };
 
+// --- Radar Imobiliário (checkpoint 11f) ---------------------------------
+
+export type MetricaConstrucao = {
+  territorioId: string | null;
+  mes: string | null;
+  alvarasAprovados: number;
+  areaLicenciadaM2: number;
+  cvcosConcluidos: number;
+  areaConcluidaM2: number;
+  // Só preenchidos no modo agregado por bairro (sem territorioId no
+  // filtro) - por mês a amostra é sempre pequena demais pra uma mediana
+  // (ver GET /imoveis/construcao no backend).
+  defasagemMedianaDias: number | null;
+  paresAlvaraCvco: number | null;
+  motivoIndisponivelDefasagem: string | null;
+};
+
+type MetricaConstrucaoApi = {
+  territorio_id: string | null;
+  mes: string | null;
+  alvaras_aprovados: number;
+  area_licenciada_m2: number;
+  cvcos_concluidos: number;
+  area_concluida_m2: number;
+  defasagem_mediana_dias: number | null;
+  pares_alvara_cvco: number | null;
+  motivo_indisponivel_defasagem: string | null;
+};
+
+function mapMetricaConstrucao(l: MetricaConstrucaoApi): MetricaConstrucao {
+  return {
+    territorioId: l.territorio_id,
+    mes: l.mes,
+    alvarasAprovados: l.alvaras_aprovados,
+    areaLicenciadaM2: l.area_licenciada_m2,
+    cvcosConcluidos: l.cvcos_concluidos,
+    areaConcluidaM2: l.area_concluida_m2,
+    defasagemMedianaDias: l.defasagem_mediana_dias,
+    paresAlvaraCvco: l.pares_alvara_cvco,
+    motivoIndisponivelDefasagem: l.motivo_indisponivel_defasagem,
+  };
+}
+
+export type ConstrucaoFiltros = {
+  territorioId?: string;
+  dataInicio?: string;
+  dataFim?: string;
+};
+
+export function getConstrucao(filtros: ConstrucaoFiltros = {}): Promise<MetricaConstrucao[]> {
+  return fetchJson<MetricaConstrucaoApi[]>("/imoveis/construcao", {
+    territorio_id: filtros.territorioId,
+    data_inicio: filtros.dataInicio,
+    data_fim: filtros.dataFim,
+  }).then((linhas) => linhas.map(mapMetricaConstrucao));
+}
+
+// Valor venal (PGV) por bairro - tipo_valor/componente/fonte_id sempre
+// explícitos (regra das quatro grandezas). Sem baseline/variação de
+// propósito: PGV não é série temporal (ver /metodologia#imoveis-valor-referencia).
+export type ValorReferenciaBairro = {
+  territorioId: string;
+  valorM2Mediano: number;
+  tipoValor: string;
+  componente: string;
+  quantidadeRegistros: number;
+  fonteId: string;
+  metodologia: string | null;
+  vigenciaInicio: string;
+};
+
+type ValorReferenciaBairroApi = {
+  territorio_id: string;
+  valor_m2_mediano: number;
+  tipo_valor: string;
+  componente: string;
+  quantidade_registros: number;
+  fonte_id: string;
+  metodologia: string | null;
+  vigencia_inicio: string;
+};
+
+export function getValorReferencia(territorioId?: string): Promise<ValorReferenciaBairro[]> {
+  return fetchJson<ValorReferenciaBairroApi[]>("/imoveis/valor-referencia", {
+    territorio_id: territorioId,
+  }).then((linhas) =>
+    linhas.map((l) => ({
+      territorioId: l.territorio_id,
+      valorM2Mediano: l.valor_m2_mediano,
+      tipoValor: l.tipo_valor,
+      componente: l.componente,
+      quantidadeRegistros: l.quantidade_registros,
+      fonteId: l.fonte_id,
+      metodologia: l.metodologia,
+      vigenciaInicio: l.vigencia_inicio,
+    })),
+  );
+}
+
+// GeoJSON de zoneamento - forma própria (não reaproveita GeoJsonFeatureCollection,
+// que é específico das properties de dim_territorio) porque as properties
+// aqui são as de canonical.zoneamento_territorial.
+export type ZoneamentoFeatureCollection = {
+  type: "FeatureCollection";
+  features: Array<{
+    type: "Feature";
+    geometry: { type: string; coordinates: unknown } | null;
+    properties: {
+      objectid_fonte: number;
+      territorio_id: string | null;
+      cd_zona: string;
+      sg_zona: string;
+      nm_zona: string;
+      nm_grupo: string | null;
+      legislacao: string | null;
+      data_versao: string | null;
+      data_atualizacao: string | null;
+      fonte_id: string;
+    };
+  }>;
+};
+
+export function getZoneamento(territorioId?: string): Promise<ZoneamentoFeatureCollection> {
+  return fetchJson<ZoneamentoFeatureCollection>("/imoveis/zoneamento", {
+    territorio_id: territorioId,
+  });
+}
+
+// Contexto de mercado/demografia (checkpoint 11d/11e) - cada fonte com sua
+// própria granularidade (UF/cidade/setor censitário agregado por bairro),
+// nunca apresentada como se fosse levantamento por bairro sem dizer isso.
+export type BcbIndicador = {
+  indicador: string;
+  categoria: string;
+  tipoValor: string | null;
+  unidade: string;
+  leitura: number;
+  fonteId: string;
+};
+
+export type QuintoandarSegmento = {
+  segmento: string;
+  aluguelM2: number;
+  variacaoMensal: number | null;
+  variacao12m: number | null;
+  fonteId: string;
+};
+
+export type CensoBairro = {
+  territorioId: string;
+  populacaoTotal: number;
+  domiciliosTotal: number;
+  domiciliosParticularesOcupados: number;
+  areaKm2: number | null;
+  densidadeDomiciliosKm2: number | null;
+  setoresAgregados: number;
+};
+
+export type ContextoImoveis = {
+  bcb: {
+    granularidade: string;
+    uf: string;
+    periodoReferencia: string | null;
+    indicadores: BcbIndicador[];
+  };
+  quintoandar: {
+    granularidade: string;
+    cidade: string;
+    periodoReferencia: string | null;
+    segmentos: QuintoandarSegmento[];
+  };
+  censo: {
+    granularidade: string;
+    anoReferencia: number;
+    bairros: CensoBairro[];
+  };
+};
+
+type ContextoImoveisApi = {
+  bcb: {
+    granularidade: string;
+    uf: string;
+    periodo_referencia: string | null;
+    indicadores: Array<{
+      indicador: string;
+      categoria: string;
+      tipo_valor: string | null;
+      unidade: string;
+      leitura: number;
+      fonte_id: string;
+    }>;
+  };
+  quintoandar: {
+    granularidade: string;
+    cidade: string;
+    periodo_referencia: string | null;
+    segmentos: Array<{
+      segmento: string;
+      aluguel_m2: number;
+      variacao_mensal: number | null;
+      variacao_12m: number | null;
+      fonte_id: string;
+    }>;
+  };
+  censo: {
+    granularidade: string;
+    ano_referencia: number;
+    bairros: Array<{
+      territorio_id: string;
+      populacao_total: number;
+      domicilios_total: number;
+      domicilios_particulares_ocupados: number;
+      area_km2: number | null;
+      densidade_domicilios_km2: number | null;
+      setores_agregados: number;
+    }>;
+  };
+};
+
+export function getContextoImoveis(): Promise<ContextoImoveis> {
+  return fetchJson<ContextoImoveisApi>("/imoveis/contexto").then((r) => ({
+    bcb: {
+      granularidade: r.bcb.granularidade,
+      uf: r.bcb.uf,
+      periodoReferencia: r.bcb.periodo_referencia,
+      indicadores: r.bcb.indicadores.map((i) => ({
+        indicador: i.indicador,
+        categoria: i.categoria,
+        tipoValor: i.tipo_valor,
+        unidade: i.unidade,
+        leitura: i.leitura,
+        fonteId: i.fonte_id,
+      })),
+    },
+    quintoandar: {
+      granularidade: r.quintoandar.granularidade,
+      cidade: r.quintoandar.cidade,
+      periodoReferencia: r.quintoandar.periodo_referencia,
+      segmentos: r.quintoandar.segmentos.map((s) => ({
+        segmento: s.segmento,
+        aluguelM2: s.aluguel_m2,
+        variacaoMensal: s.variacao_mensal,
+        variacao12m: s.variacao_12m,
+        fonteId: s.fonte_id,
+      })),
+    },
+    censo: {
+      granularidade: r.censo.granularidade,
+      anoReferencia: r.censo.ano_referencia,
+      bairros: r.censo.bairros.map((b) => ({
+        territorioId: b.territorio_id,
+        populacaoTotal: b.populacao_total,
+        domiciliosTotal: b.domicilios_total,
+        domiciliosParticularesOcupados: b.domicilios_particulares_ocupados,
+        areaKm2: b.area_km2,
+        densidadeDomiciliosKm2: b.densidade_domicilios_km2,
+        setoresAgregados: b.setores_agregados,
+      })),
+    },
+  }));
+}
+
+// Fatos objetivos sobre a base do Radar Imobiliário (checkpoint 11e) - mesmo
+// princípio de getQualidadeDados (comércio): sem nota nem score composto.
+export type QualidadeDadosImoveis = {
+  alvaras: { total: number; comTerritorioResolvido: number; pctTerritorioResolvido: number };
+  cvcos: { total: number; comTerritorioResolvido: number; pctTerritorioResolvido: number };
+  loteCadastral: { total: number; semGeometria: number; semTerritorio: number };
+  pgvVigenciaInicio: string | null;
+  pgvBairrosCobertos: number;
+  pgvTotalRegistros: number;
+  ultimaAtualizacaoPorFonte: Record<string, string | null>;
+};
+
+type QualidadeDadosImoveisApi = {
+  alvaras: { total: number; com_territorio_resolvido: number; pct_territorio_resolvido: number };
+  cvcos: { total: number; com_territorio_resolvido: number; pct_territorio_resolvido: number };
+  lote_cadastral: { total: number; sem_geometria: number; sem_territorio: number };
+  pgv_vigencia_inicio: string | null;
+  pgv_bairros_cobertos: number;
+  pgv_total_registros: number;
+  ultima_atualizacao_por_fonte: Record<string, string | null>;
+};
+
+export function getQualidadeDadosImoveis(): Promise<QualidadeDadosImoveis> {
+  return fetchJson<QualidadeDadosImoveisApi>("/imoveis/qualidade-dados").then((r) => ({
+    alvaras: {
+      total: r.alvaras.total,
+      comTerritorioResolvido: r.alvaras.com_territorio_resolvido,
+      pctTerritorioResolvido: r.alvaras.pct_territorio_resolvido,
+    },
+    cvcos: {
+      total: r.cvcos.total,
+      comTerritorioResolvido: r.cvcos.com_territorio_resolvido,
+      pctTerritorioResolvido: r.cvcos.pct_territorio_resolvido,
+    },
+    loteCadastral: {
+      total: r.lote_cadastral.total,
+      semGeometria: r.lote_cadastral.sem_geometria,
+      semTerritorio: r.lote_cadastral.sem_territorio,
+    },
+    pgvVigenciaInicio: r.pgv_vigencia_inicio,
+    pgvBairrosCobertos: r.pgv_bairros_cobertos,
+    pgvTotalRegistros: r.pgv_total_registros,
+    ultimaAtualizacaoPorFonte: r.ultima_atualizacao_por_fonte,
+  }));
+}
+
 export function getQualidadeDados(): Promise<QualidadeDados> {
   return fetchJson<QualidadeDadosApi>("/qualidade-dados").then((r) => ({
     totalEstabelecimentos: r.total_estabelecimentos,

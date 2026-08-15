@@ -4,9 +4,9 @@ import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FatoTile } from "@/components/fato-tile";
 import { Headline } from "@/components/headline";
 import { Input } from "@/components/ui/input";
-import { MethodologyTooltip } from "@/components/methodology-tooltip";
 import { QuebraCategoriaBars } from "@/components/quebra-categoria";
 import { RadiusMap } from "@/components/radius-map";
 import { RadiusResultsList } from "@/components/radius-results-list";
@@ -19,30 +19,6 @@ import { cn } from "@/lib/utils";
 
 function formatarDensidade(valor: number): string {
   return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(valor);
-}
-
-function FatoTile({
-  rotulo,
-  valor,
-  metodologia,
-}: {
-  rotulo: string;
-  valor: string;
-  metodologia?: { formula: string; ancora?: string };
-}) {
-  return (
-    <div className="flex-1 rounded-md border p-3">
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        {rotulo}
-        {metodologia && (
-          <MethodologyTooltip titulo={rotulo} formula={metodologia.formula} ancora={metodologia.ancora} />
-        )}
-      </span>
-      <p className="mt-1 text-2xl font-semibold" style={{ fontVariantNumeric: "proportional-nums" }}>
-        {valor}
-      </p>
-    </div>
-  );
 }
 
 type RadiusSearchPanelProps = {

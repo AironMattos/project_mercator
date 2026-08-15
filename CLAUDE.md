@@ -1406,7 +1406,94 @@ recusa para `TRANSACAO`/`LANCAMENTO`. Documentado como lacuna real, não escondi
   Total do projeto: **283 testes Python passando**. `alembic check` sem drift novo (só o
   já documentado desde o checkpoint 8 - nenhuma tabela nova neste checkpoint).
 
-**Checkpoint 11f (frontend) ainda não iniciado.**
+### Checkpoint 11f - Frontend do Radar Imobiliário: **concluído**
+
+Não havia prompt de referência detalhado para esta etapa (diferente dos checkpoints
+anteriores) - IA (arquitetura visual, agrupamento em abas, componentes reaproveitados)
+inferida a partir dos 5 endpoints já prontos do checkpoint 11e e dos padrões já
+estabelecidos pelo frontend do Radar de Comércio (checkpoints 6a-11e).
+
+- Rota nova `/imoveis` (`app/imoveis/page.tsx` + `components/imoveis-dashboard.tsx`) - mesma
+  forma do `Dashboard` de comércio (cabeçalho + `Tabs` + filtros + Sheet de detalhe), com
+  quatro abas em vez de três, uma por fonte real do checkpoint 11c-11e, nunca combinadas numa
+  métrica composta: **Construção** (`construcao-tab.tsx`), **Valor de referência**
+  (`valor-referencia-tab.tsx`), **Zoneamento** (`zoneamento-tab.tsx`), **Contexto de mercado**
+  (`contexto-tab.tsx` + `contexto-mercado-panel.tsx`). Filtro de período (preset como no
+  Radar de Comércio) só aparece na aba Construção - as outras três não são série temporal
+  (PGV, zoneamento e contexto de mercado são "foto" do estado mais recente, não histórico).
+- `src/lib/api.ts` ganhou os cinco fetchers do Radar Imobiliário (`getConstrucao`,
+  `getValorReferencia`, `getZoneamento`, `getContextoImoveis`, `getQualidadeDadosImoveis`),
+  mesmo padrão snake_case→camelCase já usado pro Radar de Comércio.
+- `src/lib/palette.ts` ganhou `expressaoCorSequencial` (rampa azul de 9 degraus já validada,
+  reaproveitada como sequencial de magnitude - construção e valor de referência não têm polo
+  negativo, então nunca a divergente do mapa de saldo) e `CATEGORICO_ZONEAMENTO`/
+  `ZONA_OUTROS_COR` para o zoneamento. **Decisão motivada pelo skill `dataviz`**: o zoneamento
+  real de Curitiba tem 12 `nm_grupo` distintos (confirmado por query direta no banco - "ZONAS
+  RESIDENCIAIS", "EIXO METROPOLITANO LINHA VERDE", "UNIDADE DE CONSERVAÇÃO", etc.), mas a
+  paleta categórica de 8 cores do skill só valida CVD "all-pairs" (o teste que importa pra um
+  coroplético, onde cores adjacentes quaisquer podem aparecer lado a lado) até 3 slots - acima
+  disso, o próprio skill recomenda dobrar pra "outros" ou facetar. `zoneamento-map.tsx`
+  calcula dinamicamente os 3 `nm_grupo` mais frequentes (`top3Grupos`, por contagem de
+  feição) e pinta o resto num neutro acromático - nunca uma 4ª hue arriscada. Confirmado
+  contra o banco real: os 3 mais frequentes são Zonas Residenciais, Eixo Metropolitano Linha
+  Verde e Unidade de Conservação.
+- Componentes novos extraídos/reaproveitados entre duas ou mais telas, seguindo o mesmo
+  princípio de reuso já estabelecido (`SerieTemporalChart` no checkpoint 11c):
+  `lib/geo.ts::calcularBoundsPoligonos` (extraído de `choropleth-map.tsx`, reaproveitado por
+  todos os mapas novos), `components/fato-tile.tsx` (extraído de `radius-search-panel.tsx`),
+  `components/imoveis-choropleth-map.tsx` (coroplético genérico por bairro, reaproveitado por
+  Construção e Valor de referência - a mesma forma, só a fonte/expressão de cor mudam),
+  `sequential-legend.tsx`, `categorical-legend.tsx`, `construcao-serie-chart.tsx` (mesma
+  anatomia de `SerieTemporalChart`, rótulos e significado próprios: alvará "vai mudar" x CVCO
+  "já mudou", nunca a mesma leitura de aberturas/desaparecimentos), `zoneamento-map.tsx`,
+  `data-quality-imoveis.tsx`/`data-quality-imoveis-section.tsx` (mesmo princípio de
+  `DataQuality`: fatos crus de `/imoveis/qualidade-dados`, sem nota nem score),
+  `imoveis-detail-panel.tsx` (Sheet lateral - `FatoTile`, não `StatTile`, porque a API de
+  construção não expõe baseline/tendência).
+- Navegação cruzada entre os dois produtos: link "Radar Imobiliário" adicionado ao cabeçalho
+  do Radar de Comércio (`dashboard.tsx`) e de `/comparacao`; link "Radar de Comércio" e
+  "Metodologia" no cabeçalho de `/imoveis`; tela de entrada (`app/page.tsx`) ganhou um segundo
+  CTA. Metadata do `layout.tsx` generalizada de "Radar de Comércio" pra "Mercator" (mesmo
+  motivo do rename do título da API no checkpoint 11e - a partir daqui o produto é dois
+  radares, não um com um apêndice).
+- `/metodologia` ganhou uma segunda seção "Qualidade dos dados — Radar Imobiliário"
+  (`DataQualityImoveisSection`, mesmo princípio da seção de comércio já existente) e um bloco
+  de seções próprias (`SECOES_IMOVEIS`, âncoras prefixadas `imoveis-` pra não colidir com as
+  seções de comércio) documentando alvará×CVCO, defasagem, valor de referência (PGV não é
+  série temporal), zoneamento e a granularidade de cada fonte de contexto (UF/cidade/setor).
+- **Bug real encontrado e corrigido na checagem visual**: `vigência` da PGV mostrava um dia a
+  menos (ex.: "31/12/2024" em vez de "01/01/2025", vindo de `vigencia_inicio: "2025-01-01"` da
+  API). Causa: `new Date("2025-01-01")` é interpretado como meia-noite UTC pelo construtor, e
+  `.toLocaleDateString("pt-BR")` reformata no fuso local (Curitiba, UTC-3), regredindo um dia -
+  mesma classe de bug que `formatarMesAno` (`lib/periodo.ts`, checkpoint 7c) já evitava fazendo
+  parsing por split de string em vez de `new Date`. Corrigido com `formatarDataDMY` (novo, mesmo
+  padrão de split), aplicado em `valor-referencia-tab.tsx` e `data-quality-imoveis.tsx` - os
+  dois lugares que formatavam uma data-só (sem horário) vinda da API.
+- **Achado real, não corrigido por ser pré-existente e fora do escopo deste checkpoint**: o
+  variante `outline` de `components/ui/button.tsx` (shadcn) renderiza sem nenhuma borda visível
+  - `getComputedStyle` confirma `border-color: rgba(0,0,0,0)` (a classe base `border-transparent`
+  vence a classe do variante `border-border` no CSS compilado, apesar de `cn()` usar
+  `tailwind-merge`). Reproduzido não só no CTA novo desta tela, mas também no botão
+  pré-existente "Escolher intervalo" do Radar de Comércio (`dashboard.tsx`, checkpoint 7c) -
+  não é uma regressão deste checkpoint, é um bug latente do design system que ninguém tinha
+  notado (o único outro uso de `variant="outline"` no app é um botão pequeno, menos
+  perceptível). Contornado localmente usando `variant="secondary"` no CTA de
+  `app/page.tsx` (sem borda, preenchimento sólido claro - não depende do merge de cor de
+  borda). Causa raiz (reconhecimento de `border-border` como parte do grupo de conflito
+  "border-color" pelo `tailwind-merge`) não investigada a fundo nem corrigida - decisão de
+  quando/se vale a pena mexer no design system compartilhado fica com o dono do projeto.
+- **Rodado contra o banco/API/frontend reais** (via workaround de IP de LAN - ver Notas
+  operacionais): `/imoveis` renderiza as quatro abas com dado real - Construção mostra "2.214
+  alvarás aprovados e 1.373 CVCOs concluídos" no preset padrão de 12 meses, coroplético
+  sequencial recolore corretamente ao alternar entre as duas métricas (toggle testado: 129 →
+  110 no máximo da legenda), clique num bairro (CRISTO REI) abre o painel com os stat tiles
+  certos (14 alvarás/6.126 m², 8 CVCOs/12.402 m², defasagem "dado em construção", valor venal
+  R$2.013,68/m²) e o gráfico de duas linhas; Valor de referência mostra "74 bairros" e legenda
+  até R$4.912,64/m², vigência corrigida (01/01/2025); Zoneamento mostra "223 zonas" com legenda
+  dinâmica (Zonas Residenciais/Eixo Metropolitano Linha Verde/Unidade de Conservação/outros) e
+  popup com nome completo da zona ao passar o mouse; Contexto de mercado mostra as 14 séries do
+  BCB com nomes legíveis, os 4 segmentos do QuintoAndar e a tabela de bairros do Censo ordenada
+  por densidade domiciliar. `npm run build`/`lint`/`tsc` limpos.
 
 ## Notas operacionais
 

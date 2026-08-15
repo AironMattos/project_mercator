@@ -212,6 +212,12 @@ export function Dashboard() {
             Comparar bairros
           </Link>
           <Link
+            href="/imoveis"
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Radar Imobiliário
+          </Link>
+          <Link
             href="/metodologia"
             className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
           >

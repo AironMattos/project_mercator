@@ -36,6 +36,16 @@ export function formatarMesAno(iso: string): string {
   return `${MESES_ABREVIADOS[Number(mes) - 1]}/${ano}`;
 }
 
+/** "2025-01-01" -> "01/01/2025". Split de string, nunca `new Date(iso)` -
+ * uma data "YYYY-MM-DD" sem horário é interpretada como UTC-meia-noite pelo
+ * construtor `Date`, e formatada de volta no fuso local ela regride um dia
+ * (Curitiba é UTC-3) - mesmo cuidado que formatarMesAno já toma acima. Usado
+ * pra vigência da PGV (checkpoint 11f), que só tem data, nunca horário. */
+export function formatarDataDMY(iso: string): string {
+  const [ano, mes, dia] = iso.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
 /** meses=1 -> só o mês atual; meses=3 -> mês atual + 2 anteriores; etc. */
 export function intervaloUltimosMeses(meses: number): IntervaloData {
   const hoje = new Date();

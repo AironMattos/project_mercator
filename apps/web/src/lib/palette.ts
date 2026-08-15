@@ -90,3 +90,51 @@ export function expressaoCorPorSaldo(
   }
   return expressao as unknown as ExpressionSpecification;
 }
+
+/**
+ * Sequencial (uma hue, claro -> escuro) para magnitude - Radar Imobiliário
+ * (checkpoint 11f: construção, valor de referência). Reaproveita a mesma
+ * rampa azul já validada para o braço positivo do coroplético de comércio,
+ * seguindo o skill dataviz ("sequential = one hue, light -> dark", nunca uma
+ * paleta nova por tela). `campoTemDado` distingue "bairro sem registro"
+ * (neutro, nunca entra na interpolação - ex.: bairro sem microrregião da
+ * PGV) de "bairro com valor real 0" (também neutro, mas por ser o próprio
+ * zero da escala, não por ausência de dado) - os dois casos resultam na
+ * mesma cor, mas por razões diferentes; só o primeiro é sinalizado como
+ * "sem dado" no popup de quem consome a expressão.
+ */
+export function expressaoCorSequencial(
+  campoValor: string,
+  campoTemDado: string,
+  max: number,
+  rampa: readonly string[] = RAMPA_AZUL,
+): ExpressionSpecification {
+  const teto = Math.max(max, 1);
+  const n = rampa.length;
+
+  const interpolacao: unknown[] = ["interpolate", ["linear"], ["get", campoValor], 0, NEUTRO_SALDO_ZERO];
+  rampa.forEach((cor, indice) => {
+    const fracao = (indice + 1) / n;
+    interpolacao.push(teto * fracao, cor);
+  });
+
+  const expressao: unknown[] = [
+    "case",
+    ["==", ["get", campoTemDado], true],
+    interpolacao,
+    NEUTRO_SALDO_ZERO,
+  ];
+  return expressao as unknown as ExpressionSpecification;
+}
+
+// Categórico (Zoneamento, checkpoint 11f) - só os 3 primeiros slots da
+// paleta categórica de 8 cores do skill dataviz validam all-pairs num
+// choropleth (o skill é explícito: "past three, fold to Other or facet" -
+// com todos os 28 pares em jogo, nenhuma ordenação de 4+ cores passa). O
+// zoneamento real de Curitiba tem 12 nm_grupo distintos - só os 3 mais
+// frequentes ganham cor categórica própria; o resto entra num neutro
+// acromático "outros", que não compete no teste de CVD por não ser uma 4ª
+// hue. slot 1 (azul) é o mesmo AZUL_DESTAQUE já usado no resto do produto;
+// slot 2 (laranja) é a mesma cor já usada em desaparecimentos/CVCOs.
+export const CATEGORICO_ZONEAMENTO = [AZUL_DESTAQUE, "#eb6834", "#1baf7a"] as const;
+export const ZONA_OUTROS_COR = "#c3c2b7";

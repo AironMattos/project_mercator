@@ -14,9 +14,9 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "Mercator — Radar de Comércio",
+  title: "Mercator",
   description:
-    "Mapeamento de abertura e fechamento de estabelecimentos por bairro e categoria em Curitiba",
+    "Radar territorial de Curitiba — abertura e fechamento de comércio e atividade de construção/valor de referência por bairro.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

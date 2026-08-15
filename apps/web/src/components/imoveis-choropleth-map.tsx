@@ -2,6 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 
+import type { ExpressionSpecification } from "@maplibre/maplibre-gl-style-spec";
 import {
   Map as MaplibreMap,
   NavigationControl,
@@ -13,70 +14,59 @@ import { useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { GeoJsonFeatureCollection, MetricaComercio } from "@/lib/api";
+import type { GeoJsonFeatureCollection } from "@/lib/api";
 import { calcularBoundsPoligonos } from "@/lib/geo";
 import { COR_SUPERFICIE, LARGURA_ANEL_SUPERFICIE, MAP_STYLE_URL } from "@/lib/map-style";
-import { expressaoCorPorSaldo, NEUTRO_SALDO_ZERO } from "@/lib/palette";
+import { NEUTRO_SALDO_ZERO } from "@/lib/palette";
 
-// MapLibre localiza seu worker via `import.meta.url` do próprio chunk - sob o
-// bundler do Next.js (Turbopack, dev e build) isso não resolve para uma URL
-// http(s) real, então o worker nunca carrega e as camadas de dado (fill/linha)
-// nunca renderizam (fica só o background, sem erro nenhum). Servindo uma cópia
-// estática do worker (script `postinstall`, ver package.json) e apontando para
-// ela explicitamente, contornamos essa detecção quebrada.
+// Mesma questão de worker do choropleth-map.tsx (Turbopack não resolve
+// import.meta.url do worker do MapLibre) - ver comentário lá. Inofensivo
+// chamar de novo aqui (mesmo valor).
 setWorkerUrl("/maplibre-gl-worker.mjs");
 
-type ChoroplethMapProps = {
+const CENTRO_CURITIBA: [number, number] = [-49.2731, -25.4284];
+const FONTE_ID = "imoveis-territorios";
+const CAMADA_PREENCHIMENTO = "imoveis-territorios-fill";
+const CAMADA_LINHA = "imoveis-territorios-linha";
+
+/**
+ * Coroplético genérico por bairro (Radar Imobiliário, checkpoint 11f) -
+ * reaproveitado por construção e valor de referência, que são a mesma forma
+ * (mapear um valor numérico por território, num bairro que pode ou não ter
+ * dado) com fonte/expressão de cor diferentes. Diferente de ChoroplethMap
+ * (comércio), que é fixo à semântica de saldo/aberturas/desaparecimentos -
+ * aqui o chamador já entrega a FeatureCollection mesclada e a expressão de
+ * cor prontas, então o componente não precisa conhecer o domínio do dado.
+ */
+type ImoveisChoroplethMapProps = {
   territorios: GeoJsonFeatureCollection;
-  metricas: MetricaComercio[];
+  featureCollection: GeoJSON.FeatureCollection;
+  corExpressao: ExpressionSpecification;
+  renderPopup: (props: Record<string, unknown>) => string;
   onSelecionarTerritorio?: (territorioId: string) => void;
 };
 
-const CENTRO_CURITIBA: [number, number] = [-49.2731, -25.4284];
-const FONTE_ID = "territorios";
-const CAMADA_PREENCHIMENTO = "territorios-fill";
-const CAMADA_LINHA = "territorios-linha";
-
-function featureCollectionComMetricas(
-  territorios: GeoJsonFeatureCollection,
-  metricas: MetricaComercio[],
-) {
-  const porTerritorio = new Map(metricas.map((m) => [m.territorio_id, m]));
-  return {
-    type: "FeatureCollection" as const,
-    features: territorios.features.map((feature) => {
-      const metrica = porTerritorio.get(feature.properties.territorio_id);
-      return {
-        ...feature,
-        properties: {
-          ...feature.properties,
-          // saldo sem dado vira 0 (neutro) de propósito - a expressão de cor
-          // já mapeia 0 para o cinza neutro, sem precisar de um caso especial.
-          saldo: metrica?.saldo ?? 0,
-          aberturas: metrica?.aberturas ?? null,
-          desaparecimentos: metrica?.desaparecimentos ?? null,
-          temDado: metrica !== undefined,
-        },
-      };
-    }),
-  };
-}
-
-export function ChoroplethMap({
+export function ImoveisChoroplethMap({
   territorios,
-  metricas,
+  featureCollection,
+  corExpressao,
+  renderPopup,
   onSelecionarTerritorio,
-}: ChoroplethMapProps) {
+}: ImoveisChoroplethMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
   const popupRef = useRef<Popup | null>(null);
   const onSelecionarRef = useRef(onSelecionarTerritorio);
+  const renderPopupRef = useRef(renderPopup);
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
 
   useEffect(() => {
     onSelecionarRef.current = onSelecionarTerritorio;
   }, [onSelecionarTerritorio]);
+  useEffect(() => {
+    renderPopupRef.current = renderPopup;
+  }, [renderPopup]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -92,30 +82,19 @@ export function ChoroplethMap({
 
     map.addControl(new NavigationControl({ showCompass: false }), "top-right");
 
-    // Sem isso, uma falha (fonte de dado indisponível, WebGL indisponível
-    // etc.) deixa o mapa em branco sem nenhum aviso - o mesmo princípio de
-    // nunca deixar tela quebrada em silêncio aplicado no resto do produto.
     map.on("error", (e) => {
       console.error("MapLibre error:", e.error);
       setErro(e.error?.message ?? "Erro desconhecido ao carregar o mapa");
     });
 
     map.on("load", () => {
-      const data = featureCollectionComMetricas(territorios, metricas);
-
-      map.addSource(FONTE_ID, {
-        type: "geojson",
-        data: data as GeoJSON.FeatureCollection,
-      });
+      map.addSource(FONTE_ID, { type: "geojson", data: featureCollection });
 
       map.addLayer({
         id: CAMADA_PREENCHIMENTO,
         type: "fill",
         source: FONTE_ID,
-        paint: {
-          "fill-color": NEUTRO_SALDO_ZERO,
-          "fill-opacity": 0.85,
-        },
+        paint: { "fill-color": NEUTRO_SALDO_ZERO, "fill-opacity": 0.85 },
       });
 
       map.addLayer({
@@ -123,10 +102,6 @@ export function ChoroplethMap({
         type: "line",
         source: FONTE_ID,
         paint: {
-          // Anel de 2px na cor de superfície (checkpoint 9f) - separa o
-          // preenchimento colorido tanto dos bairros vizinhos quanto do
-          // mapa-base real (ruas/rótulos) por baixo, sem desenhar uma
-          // borda escura própria.
           "line-color": COR_SUPERFICIE,
           "line-width": LARGURA_ANEL_SUPERFICIE,
           "line-opacity": 1,
@@ -143,13 +118,7 @@ export function ChoroplethMap({
         const feature = e.features?.[0];
         if (!feature || !popupRef.current) return;
         const props = feature.properties as Record<string, unknown>;
-        const nome = String(props.nome ?? "");
-        const temDado = Boolean(props.temDado);
-        const saldo = Number(props.saldo ?? 0);
-        const conteudo = temDado
-          ? `<strong>${nome}</strong><br/>saldo ${saldo > 0 ? "+" : ""}${saldo} (aberturas ${props.aberturas}, fechamentos ${props.desaparecimentos})`
-          : `<strong>${nome}</strong><br/>sem evento no período`;
-        popupRef.current.setLngLat(e.lngLat).setHTML(conteudo).addTo(map);
+        popupRef.current.setLngLat(e.lngLat).setHTML(renderPopupRef.current(props)).addTo(map);
       });
 
       map.on("mouseleave", CAMADA_PREENCHIMENTO, () => {
@@ -160,20 +129,14 @@ export function ChoroplethMap({
       map.on("click", CAMADA_PREENCHIMENTO, (e) => {
         const feature = e.features?.[0];
         const territorioId = feature?.properties?.territorio_id as string | undefined;
-        if (territorioId) {
-          onSelecionarRef.current?.(territorioId);
-        }
+        if (territorioId) onSelecionarRef.current?.(territorioId);
       });
 
       setCarregando(false);
     });
 
-    // Corrige o mapa em branco até interação (checkpoint 10d): o MapLibre é
-    // inicializado antes do container ter a dimensão final calculada pelo
-    // layout (canvas nasce 0x0 ou com um tamanho stale), e sem um resize()
-    // explícito ele nunca repinta sozinho - só depois que o usuário mexe no
-    // mapa (o que força um reflow). Um ResizeObserver cobre tanto essa
-    // primeira estabilização do layout quanto resizes de verdade depois.
+    // Mesma correção do choropleth-map (checkpoint 10d): força resize()
+    // quando o container atinge sua dimensão final de layout.
     const resizeObserver = new ResizeObserver(() => map.resize());
     resizeObserver.observe(containerRef.current);
 
@@ -183,7 +146,7 @@ export function ChoroplethMap({
       map.remove();
       mapRef.current = null;
     };
-    // Mapa é criado uma única vez; dado é atualizado no efeito abaixo via setData.
+    // Mapa é criado uma única vez; dado/cor são atualizados no efeito abaixo.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -191,22 +154,11 @@ export function ChoroplethMap({
     const map = mapRef.current;
     if (!map) return;
 
-    const data = featureCollectionComMetricas(territorios, metricas);
-    const valores = data.features
-      .filter((f) => f.properties.temDado)
-      .map((f) => f.properties.saldo);
-    const minSaldo = valores.length ? Math.min(...valores) : -1;
-    const maxSaldo = valores.length ? Math.max(...valores) : 1;
-
     const aplicar = () => {
       const source = map.getSource(FONTE_ID) as GeoJSONSource | undefined;
       if (!source) return;
-      source.setData(data as GeoJSON.FeatureCollection);
-      map.setPaintProperty(
-        CAMADA_PREENCHIMENTO,
-        "fill-color",
-        expressaoCorPorSaldo(minSaldo, maxSaldo),
-      );
+      source.setData(featureCollection);
+      map.setPaintProperty(CAMADA_PREENCHIMENTO, "fill-color", corExpressao);
     };
 
     if (map.isStyleLoaded() && map.getSource(FONTE_ID)) {
@@ -214,7 +166,7 @@ export function ChoroplethMap({
     } else {
       map.once("load", aplicar);
     }
-  }, [territorios, metricas]);
+  }, [featureCollection, corExpressao]);
 
   return (
     <div className="relative h-full w-full">
