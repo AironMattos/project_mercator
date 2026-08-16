@@ -1495,6 +1495,79 @@ estabelecidos pelo frontend do Radar de Comércio (checkpoints 6a-11e).
   BCB com nomes legíveis, os 4 segmentos do QuintoAndar e a tabela de bairros do Censo ordenada
   por densidade domiciliar. `npm run build`/`lint`/`tsc` limpos.
 
+## Radar de Anúncios (fase seguinte, checkpoints 12a-12i)
+
+Terceiro produto do projeto - mede intenção/movimento de mercado via anúncio (oferta), nunca
+transação consumada, com atualização semanal. Reaproveita `dim_territorio`/`entidade`/
+`observacao_*`/`fato_evento_territorial` sem alterá-los, mesma disciplina dos dois produtos
+anteriores. **Numeração de checkpoint reinicia em 12a-12i, terceira sequência independente**
+que só coincide em rótulo com os "checkpoints 11a-11f"/"checkpoints 11a-11e" das duas fases
+anteriores - não confundir ao procurar contexto (mesma ressalva já registrada no início da
+seção do Radar Imobiliário).
+
+Regra não-negociável desta fase: um anúncio que desaparece nunca é chamado de "venda" ou
+"imóvel vendido" em nenhum schema, endpoint ou string de UI - só "anúncio encerrado"/"saiu da
+oferta". `tipo_valor` (Checkpoint 11) ganha o valor `'anuncio'` para todo preço desta fase,
+sujeito à mesma trava de nunca misturar `tipo_valor` num agregado.
+
+### Checkpoint 12a - Verificação e formalização das duas fontes: **concluído, com um veredito desfavorável**
+
+As duas fontes (Apolar, Chaves na Mão) já haviam sido escolhidas pelo dono do projeto - este
+checkpoint não foi seleção entre candidatos, foi verificação técnica (robots.txt, sitemap) e
+legal (Termos de Uso) de cada uma, documentada em `docs/fontes-anuncios.md` antes de qualquer
+conector existir. `docs/lia-anuncios.md` (avaliação de interesse legítimo LGPD) e
+`docs/pedido-autorizacao-apolar.md` (rascunho de pedido de autorização, não enviado - enviar
+mensagem em nome do projeto é ação que exige decisão e execução do dono do projeto) também
+escritos, como exige a seção 7 do prompt de referência.
+
+- **Apolar**: `robots.txt` totalmente aberto (`Disallow:` vazio), confirmado. Sitemap
+  (`sitemap.xml`, 16.826 URLs) analisado de verdade, não só a lista de índices - **achado que
+  corrige o prompt de referência**: o segmento de URL da operação de venda é `/venda/...`, não
+  `/comprar/...` como o prompt assumia por analogia com `/alugar/...`. Contagem real de páginas
+  de detalhe em Curitiba: 940 aluguel + 2.612 venda = 3.552. **Não existe página de Termos de
+  Uso publicada** (verificado com Chrome real - o site é uma SPA renderizada no cliente,
+  `curl`/fetch sem JS só devolve a casca vazia; rodapé real só lista Política de Cookies, sem
+  nenhum link de Termos) - nenhuma cláusula contratual publicada proíbe nem autoriza scraping,
+  o `robots.txt` aberto é o único sinal técnico direto. Sem e-mail institucional público, só um
+  formulário de contato (`/fale-conosco/`) - pedido de autorização redigido, aguardando envio
+  pelo dono do projeto. **Veredito: favorável no técnico, pendente no formal** - tratar como
+  fonte sem autorização expressa (regras conservadoras da seção 7) até o pedido ser enviado e
+  respondido.
+- **Chaves na Mão**: `robots.txt` sem bloqueio geral a `User-agent: *`, mas com ~40 user-agents
+  de ferramenta de download nomeados individualmente com `Disallow: /` (`wget`, `HTTrack`,
+  `WebCopier`, etc.) e um bloco `Content-Signal` (TDM opt-out da Diretiva UE 2019/790, citado no
+  próprio arquivo) reservando direito sobre uso automatizado. **Termos de Uso próprios,
+  localizados e lidos de verdade** (`chavesnamao.com.br/termos-de-uso`) - confirmado que é
+  entidade própria ("CHAVES NA MÃO LTDA.", CNPJ 43.853.784/0001-03, sede em Curitiba), não do
+  Grupo OLX, exatamente a distinção que o prompt de referência pediu para verificar. Cláusula
+  decisiva, na seção "Condutas vedadas na plataforma": **"Uso de bots, scripts automatizados,
+  ferramentas de raspagem ou qualquer sistema que simule acesso humano"** - proibição explícita
+  e sem ambiguidade de leitura, listada ao lado de outras condutas vedadas (documento falso,
+  conteúdo impróprio). Sitemap também verificado tecnicamente (81 arquivos `.xml.gz` de venda +
+  13 de aluguel, nacionais e não filtrados por cidade, 50.000 URLs cada; Curitiba confirmada
+  presente via padrão `-pr-curitiba-` na URL, 588 ocorrências só no arquivo mais recente de
+  venda) - a viabilidade técnica não é o problema, é a cláusula contratual. **Veredito:
+  desfavorável.** Conforme a regra de decisão da seção 6.3 do prompt de referência: o conector
+  `chavesnamao_anuncios` não entra em produção com este veredito - decisão de seguir mesmo
+  assim (ex.: buscando autorização direta, já que a empresa forneceu volume de anúncios pra
+  imprensa antes) fica com o dono do projeto, registrada e datada, nunca inferida.
+- `docs/lia-anuncios.md`: separa explicitamente duas perguntas que o prompt de referência trata
+  como uma só na prática - base legal LGPD (legítimo interesse, art. 7º IX) para processar o
+  dado pessoal incidental numa página de anúncio (nome/telefone/CRECI do anunciante, descartados
+  no parsing, nunca persistidos) É uma pergunta diferente de ter permissão contratual pra
+  acessar o site de forma automatizada (Termos de Uso). O teste de balanceamento passa pras duas
+  fontes na dimensão de dado pessoal - mas isso não supera o veredito de Termos de Uso
+  desfavorável da Chaves na Mão, que é uma barreira independente.
+- **Achado fora do escopo deste checkpoint, registrado para os próximos**: o modelo de dado da
+  seção 8 do prompt de referência do Radar de Anúncios declara `fonte_id ... REFERENCES
+  canonical.dim_fonte(fonte_id)`, mas o Checkpoint 11b já decidiu deliberadamente não ter uma
+  tabela `dim_fonte` no projeto (`fonte_id` é texto livre sem FK em todo o resto do schema) -
+  a mesma decisão provavelmente vale aqui, mas fica para o Checkpoint 12c (modelo/taxonomia)
+  decidir, não é uma questão de verificação de fonte.
+
+**Checkpoint 12b (fontes gratuitas - QuintoAndar/FipeZap) ainda não iniciado.** Parado aqui
+conforme a instrução do prompt de referência ("pare e reporte" ao final do 12a).
+
 ## Notas operacionais
 
 - Ambiente Python único disponível na máquina é 3.14 (via `py -0p`); todas as dependências
