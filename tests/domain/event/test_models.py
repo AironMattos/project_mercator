@@ -89,3 +89,15 @@ def test_lancamento_e_transacao_sao_validos_mas_reservados(event_type):
     kwargs["confianca"] = "baixa"
     e = Evento(**kwargs)
     assert e.event_type == event_type
+
+
+@pytest.mark.parametrize(
+    "event_type", ["ANUNCIO_PUBLICADO", "ANUNCIO_ENCERRADO", "PRECO_ALTERADO", "REANUNCIO"]
+)
+def test_tipos_de_evento_de_anuncio_sao_validos(event_type):
+    kwargs = _base_kwargs()
+    kwargs["entity_type"] = "anuncio_imovel"
+    kwargs["event_type"] = event_type
+    kwargs["confianca"] = "baixa"
+    e = Evento(**kwargs)
+    assert e.event_type == event_type

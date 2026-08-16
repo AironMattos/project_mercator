@@ -109,11 +109,15 @@ documento e o veredito por fonte abaixo.
   pelo dono do projeto. Enquanto isso, coleta sob as regras conservadoras da seção 7 (sem
   autorização expressa) é compatível com este LIA.
 - **Chaves na Mão**: LIA favorável na dimensão de dado pessoal (mesma análise acima se aplica
-  igualmente), mas **irrelevante enquanto o veredito de Termos de Uso permanecer desfavorável**
-  (`docs/fontes-anuncios.md`, seção 2) — a cláusula que proíbe "bots, scripts automatizados,
-  ferramentas de raspagem" é uma barreira contratual independente da LGPD, e este documento não
-  a supera. Não coletar desta fonte até essa barreira ser resolvida (autorização direta,
-  ou decisão explícita do dono do projeto de assumir o risco, registrada e datada).
+  igualmente) - mas essa conclusão nunca superou, por si só, o veredito de Termos de Uso
+  desfavorável (`docs/fontes-anuncios.md`, seção 2): a cláusula que proíbe "bots, scripts
+  automatizados, ferramentas de raspagem" é uma barreira contratual independente da LGPD. O
+  dono do projeto decidiu prosseguir mesmo assim em 2026-08-15 (registrado em
+  `docs/fontes-anuncios.md`) - decisão dele, explícita e datada, sobre o risco contratual. Esta
+  LIA continua valendo exatamente como escrita para a dimensão de dado pessoal: a coleta desta
+  fonte só é aceitável se a disciplina de descarte da seção 1 for implementada de fato, com
+  teste automatizado - a decisão sobre o risco contratual não abre exceção nenhuma na disciplina
+  de dado pessoal.
 
 ## 4. Direitos do titular e canal de contato
 

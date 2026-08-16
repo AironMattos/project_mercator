@@ -21,6 +21,17 @@ dependencies = [
     "uvicorn>=0.52",
     "pandas>=2.0",
     "geopandas>=1.1",
+    # Radar de Anúncios (checkpoint 12d) - parsing de HTML real (JSON-LD +
+    # ficha técnica), conectores apolar_anuncios/chavesnamao_anuncios.
+    "beautifulsoup4>=4.13",
+    "lxml>=5.3",
+    # apolar_anuncios especificamente (checkpoint 12d): a Apolar é uma SPA
+    # em Vue totalmente renderizada no cliente - preço/quartos/vagas/
+    # andar/condomínio só existem depois do JS rodar, `requests` sozinho
+    # não vê esses campos (achado real, ver connector.py). Decisão
+    # confirmada com o dono do projeto: Playwright só pra este conector,
+    # Chaves na Mão continua HTTP puro (server-rendered).
+    "playwright>=1.55",
 ]
 
 [project.optional-dependencies]

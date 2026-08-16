@@ -37,6 +37,19 @@ TIPOS_EVENTO_VALIDOS = frozenset(
         # recusa.
         "LANCAMENTO",
         "TRANSACAO",
+        # entity_type="anuncio_imovel" (Radar de Anúncios, checkpoint 12) -
+        # mede intenção/movimento de oferta, nunca transação consumada (ver
+        # docs/fontes-anuncios.md e a seção 1 do prompt de referência: um
+        # anúncio nunca é chamado de "venda"). ANUNCIO_ENCERRADO é sempre
+        # confiança "baixa" por natureza - o anúncio pode ter saído da
+        # oferta por venda, aluguel, retirada, expiração ou republicação
+        # com outro identificador, indistinguíveis de fora (mesma
+        # distinção que já separa DESAPARECIMENTO de FECHAMENTO_CONFIRMADO
+        # no Radar de Comércio).
+        "ANUNCIO_PUBLICADO",
+        "ANUNCIO_ENCERRADO",
+        "PRECO_ALTERADO",
+        "REANUNCIO",
     }
 )
 CONFIANCAS_VALIDAS = frozenset({"alta", "media", "baixa"})

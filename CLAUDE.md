@@ -1565,8 +1565,100 @@ escritos, como exige a seção 7 do prompt de referência.
   a mesma decisão provavelmente vale aqui, mas fica para o Checkpoint 12c (modelo/taxonomia)
   decidir, não é uma questão de verificação de fonte.
 
-**Checkpoint 12b (fontes gratuitas - QuintoAndar/FipeZap) ainda não iniciado.** Parado aqui
-conforme a instrução do prompt de referência ("pare e reporte" ao final do 12a).
+### Checkpoint 12c - Domínio e taxonomia: **concluído**
+
+Numa sessão que foi interrompida por limite antes de fechar o checkpoint (o commit em disco
+parou no 12a) - trabalho recuperado e fechado numa sessão seguinte, depois de conferir tudo
+contra o estado real do repositório, não só contra este arquivo.
+
+- `src/domain/anuncio/` - `ObservacaoAnuncio`/`ClusterImovel` (dataclasses puras),
+  `taxonomia.py` (normalização de tipologia, mesmo padrão de `commerce/categories`),
+  `impressao_digital.py` (assinatura determinística território+área+quartos+vagas+andar+
+  condomínio, usada pra casar o mesmo imóvel entre as duas fontes), `resolucao.py`
+  (`resolver_imoveis`/`CandidatoResolucao` - clustering por impressão digital dentro de uma
+  janela de tempo, `JANELA_PADRAO_DIAS`), `regras.py` (`detectar_eventos_anuncio_par`,
+  `detectar_anuncio_encerrado`, `detectar_reanuncio` - regra pura, sem I/O, mesmo padrão de
+  `domain/event/regras.py`).
+- Catálogo de eventos (`domain/event/models.py`) ganhou `ANUNCIO_PUBLICADO`,
+  `ANUNCIO_ENCERRADO`, `PRECO_ALTERADO`, `REANUNCIO` (`entity_type="anuncio_imovel"`).
+  `ANUNCIO_ENCERRADO` é sempre confiança "baixa" por natureza - um anúncio pode sair da oferta
+  por venda, aluguel, retirada, expiração ou republicação com outro identificador,
+  indistinguíveis de fora (mesma distinção que já separa `DESAPARECIMENTO` de
+  `FECHAMENTO_CONFIRMADO` no Radar de Comércio). `REANUNCIO` entra como reservado - a regra
+  que cruza um anúncio novo contra o histórico de `ANUNCIO_ENCERRADO` fica para o checkpoint
+  12e, mesmo padrão de `FECHAMENTO_CONFIRMADO`/`TRANSACAO`/`LANCAMENTO`.
+- 67 testes novos (`tests/domain/anuncio/`, `tests/lint/test_vocabulario_anuncio.py` - este
+  último varre o código-fonte por strings proibidas tipo "venda confirmada"/"imóvel vendido"
+  fora de contexto de operação, reforçando em teste automatizado a regra não-negociável desta
+  fase: um anúncio que desaparece nunca é chamado de venda).
+
+### Checkpoint 12d - Conectores, persistência e pipelines: **concluído, rodado contra as fontes reais**
+
+- **`apolar_anuncios`** (`src/infrastructure/connectors/apolar_anuncios/`) - achado real: a
+  Apolar é uma SPA em Vue renderizada 100% no cliente, `requests` sozinho só vê título/meta
+  description, nunca preço/quartos/vagas/condomínio. `normalize()` usa Playwright (Chromium
+  headless) pra renderizar cada página antes do parse - decisão confirmada com o dono do
+  projeto (não é troca por endpoint interno de API, que a seção 7 do prompt de referência
+  proíbe explicitamente; é a mesma página pública que qualquer visitante veria). `fetch()`
+  continua HTTP puro (o sitemap é XML estático). Rate limit de 3s/req (`INTERVALO_MINIMO_S`).
+- **`chavesnamao_anuncios`** (`src/infrastructure/connectors/chavesnamao_anuncios/`) - HTTP
+  puro (site server-rendered), descoberta só por sitemap (94 arquivos `.xml.gz`), mesmo rate
+  limit de 3s/req. Achado real de escala: 81.408 anúncios de Curitiba/PR - a 3s/req, coletar
+  tudo levaria ~68h; o conector reporta essa estimativa e nunca tenta rodar de uma vez
+  (`LIMIAR_HORAS_PARA_AVISAR`, mesmo padrão do checkpoint 9c/Nominatim).
+- `canonical.dim_tipologia_imovel`, `canonical.observacao_anuncio`, `canonical.imovel_resolvido`,
+  `canonical.imovel_resolvido_membro` - migração `95ec5cf9b2ae`, aplicada no Postgres local.
+  `infrastructure/database/orm/dim_tipologia_imovel.py`/`observacao_anuncio.py` (as duas
+  tabelas de `imovel_resolvido*` moram neste segundo arquivo, junto da tabela que elas
+  referenciam) + `repositories/anuncio_repository.py`, `imovel_resolvido_repository.py`,
+  `tipologia_repository.py`.
+- `pipelines/ingestion/run_chavesnamao_anuncios.py`, `run_tipologias_imovel.py` e
+  `pipelines/event_detection/run_anuncio.py` (detecta `ANUNCIO_PUBLICADO`/`PRECO_ALTERADO`/
+  `ANUNCIO_ENCERRADO` comparando dois snapshots já ingeridos; `REANUNCIO` fica pro 12e, mesmo
+  motivo do domínio acima) - todos retomáveis por design (mesmo padrão de `alvaras_smf`/
+  geocodificação: um lote parcial ou interrompido continua de onde parou, sem re-coletar).
+- **`pipelines/ingestion/run_apolar_anuncios.py`** - único pedaço que faltava pra fechar o
+  checkpoint quando o trabalho foi retomado; escrito espelhando exatamente
+  `run_chavesnamao_anuncios.py` (mesma estrutura de retomada via
+  `listar_identificadores_fonte_com_observacao`, mesmo padrão de lote+`pipeline_run`).
+- **Dois problemas reais pegos só ao rodar contra o ambiente/site de verdade** (nenhum dos
+  dois aparecia nos testes unitários, que usam sessão HTTP/renderizador fake):
+  - Os 4 diretórios de teste novos desta fase (`tests/domain/anuncio/`, `tests/lint/`,
+    `tests/infrastructure/connectors/{apolar,chavesnamao}_anuncios/`) não tinham `__init__.py`
+    - diferente de todo outro diretório de teste do projeto -, o que quebrava a *coleta* do
+    pytest inteira (`import file mismatch` entre `apolar_anuncios/test_connector.py` e
+    `chavesnamao_anuncios/test_connector.py`, mesmo nome de módulo sem pacote pra
+    desambiguar). Corrigido adicionando os `__init__.py` faltantes.
+  - `apolar_anuncios/connector.py::_renderizador_playwright` tentava anexar um atributo
+    (`.fechar`) a `sessao.renderizar`, um bound method - bound methods não têm `__dict__`
+    próprio, então isso levanta `AttributeError` na primeira chamada real (só apareceu
+    rodando contra o site de verdade; o teste unitário injeta uma função fake, que aceita o
+    atributo sem problema). Corrigido envolvendo a chamada numa função solta antes de anexar
+    `.fechar`.
+  - Depois das duas correções: os **354 testes do projeto passam** (67 novos deste checkpoint).
+- **Rodado contra as fontes reais**: smoke test da Apolar (5 páginas, Playwright real) -
+  preço/área/quartos/vagas/condomínio/andar corretos, `territorio_id` resolvido em 5 de 5
+  contra `dim_territorio` (bairro já vem no slug da URL, sem geocodificação). Coleta completa
+  da Apolar (~3.549 páginas de Curitiba, ~3h a 3s/req) iniciada em background depois do smoke
+  test - decisão do dono do projeto de rodar tudo de uma vez em vez de em lotes, já que o
+  pipeline é retomável se precisar interromper.
+- **Chaves na Mão: pipeline pronto e testado, mas coleta real ainda não rodou.** O comando
+  (`python -m pipelines.ingestion.run_chavesnamao_anuncios`) foi bloqueado pelo classificador
+  de modo automático do Claude Code antes de qualquer requisição sair - meu palpite é a
+  cláusula de Termos de Uso que proíbe "bots, scripts automatizados, ferramentas de
+  raspagem" (`docs/fontes-anuncios.md`, seção 2), mesmo com a decisão do dono do projeto de
+  2026-08-15 já registrada de prosseguir assumindo o risco. Diferente da Apolar, essa
+  ferramenta específica não pôde confirmar a hipótese do bug (não chegou a rodar), então fica
+  como uma suspeita razoável, não um fato verificado. Rodar essa coleta específica depende de
+  uma decisão de permissão do dono do projeto (regra de permissão no Claude Code, ou rodar o
+  comando fora dele) - não tentei contornar.
+
+**Checkpoint 12b (fontes gratuitas - QuintoAndar/FipeZap) segue não iniciado** - a sessão que
+construiu 12c/12d avançou direto para o domínio/conectores das duas fontes pagas em vez de
+seguir a ordem 12a→12b→12c do prompt de referência; motivo não registrado em nenhum lugar
+recuperável (provavelmente decisão do dono do projeto na hora, não documentada). Não
+reordenado nem questionado aqui - só registrado como está, pra quem retomar não estranhar a
+lacuna.
 
 ## Notas operacionais
 

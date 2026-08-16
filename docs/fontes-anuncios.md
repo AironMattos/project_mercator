@@ -94,6 +94,14 @@ ela), a Apolar deve ser tratada como fonte sem autorização expressa: regras da
 Uso não é interpretada como autorização de uso comercial do dado coletado — só como ausência de
 proibição contratual explícita.
 
+**Decisão do dono do projeto (2026-08-15)**: prosseguir com a coleta sem aguardar resposta ao
+pedido de autorização ("pode seguir com o scraping... não há necessidade de aceite"). Registrado
+aqui como a decisão explícita que a seção 6.3 do prompt de referência exige antes de construir
+o conector sem autorização confirmada. As regras técnicas da seção 7 (sitemap-only, ritmo
+conservador, identificação honesta, nunca burlar proteção técnica, descarte de dado pessoal)
+continuam valendo integralmente - a decisão dispensa a autorização formal, não a disciplina de
+coleta.
+
 ---
 
 ## 2. Chaves na Mão (`chavesnamao.com.br`) — seção 6.2
@@ -209,24 +217,31 @@ direto (diferente da Apolar, que só tem formulário).
 
 **Desfavorável.** Termos de Uso próprios (não do Grupo OLX, confirmado por CNPJ/razão social),
 com cláusula explícita proibindo "bots, scripts automatizados, ferramentas de raspagem" — sem
-ambiguidade de leitura. Conforme a regra de decisão da seção 6.3 do prompt de referência: **não
-construir o conector `chavesnamao_anuncios` com este veredito.** Reportado aqui, decisão de
-seguir mesmo assim (por exemplo, buscando autorização direta antes de coletar, dado que a
-empresa já forneceu volume de anúncios pra imprensa antes) é do dono do projeto — registrada e
-datada, não inferida por mim.
+ambiguidade de leitura. Conforme a regra de decisão da seção 6.3 do prompt de referência, esse
+veredito por si só bloquearia a construção do conector `chavesnamao_anuncios`.
+
+**Decisão do dono do projeto (2026-08-15)**: prosseguir mesmo assim ("pode seguir com o
+scraping... não há necessidade de aceite") - decisão explícita, registrada e datada, que a
+seção 6.3 do prompt de referência prevê como a única forma de seguir com um veredito
+desfavorável. Isso muda a autorização contratual, não o risco documentado nem a disciplina
+técnica: a cláusula dos Termos de Uso continua proibindo a conduta (o risco contratual é real e
+foi assumido conscientemente pelo dono do projeto, não eliminado), e as regras da seção 7
+(sitemap-only, ritmo conservador, identificação honesta, nunca burlar proteção técnica,
+descarte de dado pessoal) valem com o mesmo rigor de antes - inclusive mais, já que é a única
+salvaguarda restante nesta fonte.
 
 ---
 
 ## 3. Regra de decisão aplicada
 
-Nenhum coletor entra em produção para nenhuma das duas fontes neste checkpoint — 12a é
-verificação, não implementação (seção 12, "Checkpoint 12a — Verificação e formalização"). Para
-a Apolar, o próximo passo depende do dono do projeto: enviar (ou não) o pedido de autorização
-redigido em `docs/pedido-autorizacao-apolar.md`, e registrar a resposta aqui quando houver. Para
-a Chaves na Mão, o próximo passo também depende do dono do projeto: aceitar o veredito
-desfavorável e não coletar, ou buscar autorização direta antes de reconsiderar — mas não
-construir o conector com base só no `robots.txt` (que não bloqueia) ignorando a cláusula
-explícita dos Termos de Uso (que bloqueia).
+12a foi verificação, não implementação — nenhum coletor foi construído durante este checkpoint.
+Com a decisão do dono do projeto de 2026-08-15 (registrada nas seções 1 e 2 acima), os
+checkpoints seguintes (12c em diante) constroem os dois conectores. O pedido de autorização em
+`docs/pedido-autorizacao-apolar.md` segue disponível caso o dono do projeto decida enviá-lo
+depois - não é mais um bloqueio para a Apolar, mas continua sendo a via mais limpa se a Apolar
+responder favoravelmente em algum momento. Para a Chaves na Mão, o risco contratual documentado
+na seção 2 não desaparece com a decisão de prosseguir - fica registrado aqui como um risco
+assumido conscientemente, não como um problema resolvido.
 
 ## 4. Nota fora do escopo deste checkpoint, registrada para os próximos
 
