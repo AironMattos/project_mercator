@@ -2,16 +2,25 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from domain.anuncio import ObservacaoAnuncio
+from infrastructure.database.orm.fato_evento_territorial import (
+    FatoEventoTerritorial as FatoEventoTerritorialORM,
+)
 from infrastructure.database.orm.observacao_anuncio import (
     ObservacaoAnuncio as ObservacaoAnuncioORM,
 )
+
+# Prefixo usado pelos conectores quando não há área útil suficiente pra
+# calcular uma impressão digital de verdade (ver connector.py de
+# apolar_anuncios) - esses anúncios nunca participam de resolução entre
+# fontes nem de detecção de REANUNCIO, mesmo tratamento nos dois lugares.
+PLACEHOLDER_SEM_FINGERPRINT = "sem-fp:"
 
 
 def _linha(o: ObservacaoAnuncio) -> dict:
@@ -141,3 +150,58 @@ def iter_observacoes_anuncio_por_fonte(
 
     for row in session.execute(stmt):
         yield _from_row(row[0])
+
+
+def buscar_encerrados_recentes_por_impressao(
+    session: Session,
+    impressoes_digitais: set[str],
+    janela_dias: int,
+    antes_de: date,
+) -> dict[str, tuple[uuid.UUID, float | None]]:
+    """Para cada impressão digital candidata (de um anúncio recém-visto,
+    sem observação anterior), o `ANUNCIO_ENCERRADO` mais recente dentro
+    da janela cuja observação de origem tenha essa mesma impressão -
+    usado pra decidir `REANUNCIO` vs `ANUNCIO_PUBLICADO` (seção 5 do
+    prompt de referência do Radar de Anúncios: "o mesmo imóvel volta à
+    oferta em janela curta"). Nunca considera impressões
+    `PLACEHOLDER_SEM_FINGERPRINT` (mesma exclusão de
+    `domain.anuncio.resolucao`).
+
+    Join via `origem_observacoes[1]` (1-indexado no Postgres) - mesmo
+    padrão já usado por `construcao_repository` pra ler a observação de
+    origem de um evento sem duplicar o dado no próprio evento."""
+    if not impressoes_digitais:
+        return {}
+    candidatas = {
+        i for i in impressoes_digitais if not i.startswith(PLACEHOLDER_SEM_FINGERPRINT)
+    }
+    if not candidatas:
+        return {}
+
+    evento = FatoEventoTerritorialORM
+    obs = ObservacaoAnuncioORM
+    limite_inferior = antes_de - timedelta(days=janela_dias)
+
+    stmt = (
+        select(obs.impressao_digital, evento.entidade_id, obs.preco)
+        .select_from(evento)
+        .join(obs, obs.observacao_id == evento.origem_observacoes[1])
+        .where(
+            evento.entity_type == "anuncio_imovel",
+            evento.event_type == "ANUNCIO_ENCERRADO",
+            evento.data_evento >= limite_inferior,
+            evento.data_evento < antes_de,
+            obs.impressao_digital.in_(candidatas),
+        )
+        .order_by(obs.impressao_digital, evento.data_evento.desc())
+    )
+
+    resultado: dict[str, tuple[uuid.UUID, float | None]] = {}
+    for impressao, entidade_id_anterior, preco in session.execute(stmt):
+        # primeira linha por impressão = a mais recente (ORDER BY ... desc)
+        if impressao not in resultado:
+            resultado[impressao] = (
+                entidade_id_anterior,
+                float(preco) if preco is not None else None,
+            )
+    return resultado

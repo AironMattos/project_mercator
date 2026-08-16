@@ -1807,6 +1807,86 @@ prosseguir para ambas" - a sessão anterior não pulou o 12b por engano, o promp
   da Chaves na Mão (checkpoint 12d, ver acima) em background, sem conflito - processos e
   tabelas independentes.
 
+### Checkpoint 12e - Ciclo de vida: **parcial, com um bloqueio real de calendário registrado**
+
+Este checkpoint tem duas partes independentes na seção 12 do prompt de referência: (1)
+segundo/terceiro snapshots com `ANUNCIO_ENCERRADO`/`PRECO_ALTERADO`/`REANUNCIO` funcionando, e
+(2) calibração contra ONR e QuintoAndar (seções 1.1 e 9). A primeira esbarra numa restrição de
+calendário real que nenhuma sessão consegue contornar - registrada aqui antes de fingir que não
+existe.
+
+- **`REANUNCIO` implementado e wireado** (faltava desde o checkpoint 12d, que já tinha deixado
+  isso reservado explicitamente). `anuncio_repository.buscar_encerrados_recentes_por_impressao`
+  (novo) - dado um conjunto de impressões digitais candidatas, acha o `ANUNCIO_ENCERRADO` mais
+  recente (dentro de `JANELA_PADRAO_DIAS`, reaproveitada de `domain.anuncio.resolucao` - mesmo
+  conceito de "janela razoável" da seção 8.1, sem inventar um segundo número) cuja observação de
+  origem bata, via join por `origem_observacoes[1]` (mesmo padrão já usado por
+  `construcao_repository` no Radar Imobiliário). Nunca considera impressões
+  `PLACEHOLDER_SEM_FINGERPRINT` (`"sem-fp:..."`, anúncios sem área útil suficiente) - mesma
+  exclusão que já valia pra resolução entre fontes. Busca é **cross-fonte de propósito**: o
+  mesmo imóvel físico pode reaparecer em qualquer uma das duas fontes, não só na mesma.
+  `pipelines/event_detection/run_anuncio.py` reescrito para resolver "anúncios novos" (sem
+  observação anterior) **em lote** (uma consulta por lote de `TAMANHO_LOTE`, não uma por
+  anúncio) contra essa função, decidindo `REANUNCIO` vs `ANUNCIO_PUBLICADO` - mesma leitura "mais
+  específica do mesmo fato, não um evento adicional" já usada em
+  `ABERTURA_CONFIRMADA`/`PRIMEIRA_OBSERVACAO` (Radar de Comércio, checkpoint 3).
+  - **Validação sem pytest, mesmo padrão já estabelecido no projeto** (nenhum repositório deste
+    projeto tem teste unitário dedicado - só domínio puro e conectores com sessão fake são
+    testados via pytest; repositórios são verificados contra o banco real e documentados aqui).
+    Rodado numa transação aberta e nunca commitada (rollback no fim, nada persistido) contra o
+    banco real: evento sintético de `ANUNCIO_ENCERRADO` inserido apontando pra uma observação
+    real existente → a consulta encontra a correspondência certa (entidade + preço); fora da
+    janela → não encontra; impressão placeholder → nunca entra. Os três ramos confirmados.
+  - **Rodado de verdade contra dado real, não só sintético**: um achado incidental abriu uma
+    janela genuína pra isso - `canonical.observacao_anuncio` tinha 8 registros residuais de
+    `chavesnamao_anuncios` datados de 2026-08-15 (resquício de uma tentativa anterior a esta
+    sessão, antes do bloqueio de autorização ser resolvido), ao lado dos 5.005 de 2026-08-16.
+    Rodar `python -m pipelines.event_detection.run_anuncio chavesnamao_anuncios 2026-08-15
+    2026-08-16` de ponta a ponta contra o banco real produziu **5.001 eventos reais gravados**:
+    4.999 `ANUNCIO_PUBLICADO`, 2 `ANUNCIO_ENCERRADO` (dos 8 antigos, só 2 não apareceram no
+    snapshot novo) - `REANUNCIO` não disparou nenhuma vez nessa amostra (esperado, com só 2
+    encerrados e volume pequeno, nenhuma coincidência de impressão digital). Não é o cenário
+    real do produto (snapshots deveriam ser semanais, não de um dia pro outro, e o resíduo de
+    8 registros é minúsculo) - mas prova que o código roda de ponta a ponta contra dado real
+    sem erro, incluindo o caminho novo de `REANUNCIO`.
+- **Bloqueio real de calendário, não contornável**: `ANUNCIO_ENCERRADO`/`PRECO_ALTERADO`/
+  `REANUNCIO` em escala de produto exigem dois snapshots semanais reais e completos das duas
+  fontes - isso significa dias/semanas de calendário passando entre execuções da coleta, não
+  algo que uma sessão consiga produzir sozinha revisitando o mesmo dia. O achado dos 8 registros
+  residuais acima prova que o *mecanismo* funciona; não substitui os snapshots de verdade.
+  Próximo passo real: rodar `run_apolar_anuncios.py`/`run_chavesnamao_anuncios.py` de novo
+  daqui a uma semana (ou quando o dono do projeto decidir), depois `run_anuncio.py` pra cada
+  fonte comparando as duas datas.
+- **Calibração contra ONR (seção 1.1) - achado real que diverge do prompt de referência**:
+  investigação técnica direta no Portal Estatístico Registral
+  (`registrodeimoveis.org.br/portal-estatistico-registral`, verificado com Chrome real, não só
+  `WebFetch`) mostra que a página **não expõe** a série de "volume mensal de atos de
+  transferência" como CSV baixável, ao contrário do que a seção 1.1 do prompt de referência
+  descreve ("publicado de graça... CSV, série desde 2017"). O que a página realmente expõe com
+  exportação de CSV ao vivo são só **Usucapião Extrajudicial** e **Recuperação de Crédito**
+  (execução extrajudicial de devedor fiduciante) - filtráveis por UF/comarca/serventia/ano/mês,
+  2017-2026. O indicador de compra-e-venda que o prompt de referência quer (o que apareceu no
+  achado do checkpoint anterior, "Curitiba +14,7%" etc.) só existe publicado como **notícia
+  narrativa periódica** (ex.: "Indicadores de transações imobiliárias - Janeiro/24", artigo de
+  blog, não dado estruturado) - o link que a própria notícia dá como "relatório completo" volta
+  pro mesmo Portal Estatístico que não tem esse indicador em CSV. Não encontrado (buscado
+  também `/dados-abertos`, que redireciona pra home) nenhum outro caminho de dado estruturado
+  pra esse indicador específico. **Calibração contra ONR fica bloqueada até uma investigação
+  mais profunda** (ex.: contato direto com o RIB perguntando se existe um caminho de dado bruto
+  não descoberto, mesmo padrão do pedido de autorização já redigido pra Apolar) - decisão de
+  investir nisso, ou aceitar calibrar só contra QuintoAndar (aluguel), é do dono do projeto.
+- **Calibração contra QuintoAndar (seção 9) - também bloqueada, mas por dado de anúncio, não
+  por fonte**: tecnicamente possível desde o checkpoint 12b (o índice já está no banco,
+  atualizado até ago/2025), mas a métrica em si ("descolamento entre pedido e contratado")
+  precisa do preço pedido mediano de aluguel calculado a partir de anúncios reais - que
+  depende do mesmo bloqueio de calendário acima (`ANUNCIO_PUBLICADO`/estoque de aluguel real
+  precisa de volume real coletado, que já existe via a coleta desta sessão, mas a série
+  temporal de preço pedido precisa de mais de um ponto no tempo pra fazer sentido como
+  "descolamento", não um single snapshot).
+- Nenhum teste novo de pytest (mesma nota acima - a mudança é em repositório/pipeline, testados
+  contra o banco real, não com fixture). **385 testes Python seguem passando** (nenhuma
+  regressão). `alembic check` sem drift novo.
+
 ## Notas operacionais
 
 - Ambiente Python único disponível na máquina é 3.14 (via `py -0p`); todas as dependências
