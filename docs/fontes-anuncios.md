@@ -102,6 +102,9 @@ conservador, identificação honesta, nunca burlar proteção técnica, descarte
 continuam valendo integralmente - a decisão dispensa a autorização formal, não a disciplina de
 coleta.
 
+**Atualizado em 2026-08-16** (ver seção 2.1): autorização direta obtida da Apolar por conversa
+- a coleta deixa de rodar sob "sem autorização expressa" e passa a ter autorização confirmada.
+
 ---
 
 ## 2. Chaves na Mão (`chavesnamao.com.br`) — seção 6.2
@@ -230,7 +233,41 @@ foi assumido conscientemente pelo dono do projeto, não eliminado), e as regras 
 descarte de dado pessoal) valem com o mesmo rigor de antes - inclusive mais, já que é a única
 salvaguarda restante nesta fonte.
 
+**Atualizado em 2026-08-16** (ver seção 2.1): autorização direta obtida da Chaves na Mão por
+conversa - o veredito desfavorável dos Termos de Uso deixa de ser um risco assumido sem
+consentimento e passa a ter autorização confirmada do titular do site.
+
 ---
+
+## 2.1 Atualização — autorização direta obtida das duas empresas (2026-08-16)
+
+**Declaração do dono do projeto, registrada em 2026-08-16**: "Estou concedendo todas as
+permissões após conversas com ambas as empresas." Isso supera as duas decisões de 2026-08-15
+acima, que eram decisões de *prosseguir sem autorização confirmada* (Apolar) ou de *prosseguir
+apesar de um veredito de Termos de Uso desfavorável* (Chaves na Mão) - agora, segundo o dono do
+projeto, existe autorização direta e efetiva das duas empresas, obtida por conversa fora deste
+projeto (não por e-mail formal via o pedido redigido em `docs/pedido-autorizacao-apolar.md`,
+que segue não enviado e agora é redundante).
+
+**O que muda**: as duas fontes deixam de operar sob "regras conservadoras de fonte sem
+autorização" (seção 7, primeira metade) e passam a ter o cenário de menor risco possível
+descrito na seção 6.1 do prompt de referência - autorização documentada. Para a Chaves na Mão
+em particular, isso muda o risco contratual da cláusula de Termos de Uso: a conduta que a
+cláusula proíbe deixa de ser praticada sem consentimento do titular do site, porque o titular
+consentiu diretamente.
+
+**O que não muda**: nenhuma das disciplinas técnicas da seção 7 é dispensada por causa de
+autorização - identificação honesta, ritmo conservador (3s/req), descoberta só por sitemap,
+nunca burlar proteção técnica, descarte de dado pessoal na ingestão (nome/telefone/e-mail/CRECI
+nunca persistidos), Raw Zone sem conteúdo autoral (violação real dessa regra, encontrada e
+corrigida em 2026-08-16 nos dois conectores - ver `CLAUDE.md`, checkpoint 12d). Autorização
+muda quem pode reclamar de a coleta acontecer, não o que é coletado nem como.
+
+**Registro honesto de limitação**: não tenho, neste momento, um documento (e-mail, contrato,
+mensagem) da autorização em si - só a declaração do dono do projeto nesta conversa, que é
+tratada aqui com o mesmo peso que as decisões de 2026-08-15 já registradas (mesmo padrão do
+projeto: decisão explícita e datada do dono, não inferida). Se houver correspondência real
+disponível depois, vale anexá-la ou referenciá-la aqui para o registro ficar mais completo.
 
 ## 3. Regra de decisão aplicada
 
