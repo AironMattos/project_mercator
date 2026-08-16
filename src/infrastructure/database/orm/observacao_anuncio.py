@@ -19,6 +19,16 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from infrastructure.database.orm.base import Base
 
+# Achado real (checkpoint 12f): este módulo declara FK para as três
+# tabelas abaixo, mas Base.metadata é um registro global por processo -
+# se algo importar só este módulo (sem os três) numa sessão de teste que
+# roda create_all() em outro lugar, o FK fica irresolúvel na hora de
+# ordenar as tabelas, mesmo que sqlalchemy resolva por string. Garantir
+# aqui, e não depender de quem importa primeiro.
+from infrastructure.database.orm import dim_tipologia_imovel  # noqa: F401,E402
+from infrastructure.database.orm import entidade  # noqa: F401,E402
+from infrastructure.database.orm import territorio  # noqa: F401,E402
+
 
 class ObservacaoAnuncio(Base):
     """O que sabíamos sobre um anúncio, e quando (Radar de Anúncios,

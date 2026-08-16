@@ -1887,6 +1887,81 @@ existe.
   contra o banco real, não com fixture). **385 testes Python seguem passando** (nenhuma
   regressão). `alembic check` sem drift novo.
 
+### Checkpoint 12f - Termômetro: **concluído para o que dado real sustenta hoje**
+
+Seção 2 do prompt de referência (9 métricas por bairro × tipologia × operação × mês, quadrante
+de aquecimento na seção 2.1, piso de amostra na seção 2.2). Mesma disciplina do checkpoint 12e:
+construir tudo, deixar rodar contra dado real, e não fingir que métricas que dependem de
+histórico têm um número quando não têm.
+
+- `src/analytics/features/anuncio_termometro.py` (novo, puro, sem I/O) - uma função pequena por
+  métrica (mesmo estilo de `indicadores.py`, não uma função gigante fazendo tudo):
+  `contar_novos_anuncios` (soma `ANUNCIO_PUBLICADO`+`REANUNCIO` - mesmo raciocínio já usado pra
+  `aberturas` no Radar de Comércio, checkpoint 8: `REANUNCIO` é uma leitura mais específica do
+  mesmo fato "entrou na oferta", não uma categoria à parte), `calcular_novos_por_mil_domicilios`,
+  `calcular_rotacao_oferta`, `calcular_renovacao`, `calcular_permanencia_mediana`,
+  `calcular_pressao_preco`, `calcular_estatistica_preco` (mediana/P25/P75 via
+  `statistics.quantiles`, reaproveitada tanto pra preço quanto pra preço/m²),
+  `classificar_quadrante_aquecimento` (as 4 leituras nomeadas da seção 2.1 - `aquecendo`/
+  `otimismo_nao_validado`/`ajustando`/`desacelerando`, `None` quando falta qualquer uma das
+  duas variações de entrada, nunca um palpite com metade da informação). `PISO_MINIMO_AMOSTRA
+  = 30` (seção 2.2) - abaixo disso, mediana/P25/P75 viram `None` com
+  `motivo_indisponivel="amostra_insuficiente"`, a contagem crua continua visível. 22 testes.
+- `infrastructure/database/repositories/termometro_repository.py` (novo) -
+  `consultar_estoque_e_precos_ativos` (uma linha por cluster resolvido ainda ativo - exclui
+  entidades com `ANUNCIO_ENCERRADO` já gravado, nunca conta o mesmo imóvel físico duas vezes,
+  seção 8.1) e `consultar_contagem_eventos_por_celula` (tipos de evento por bairro/tipologia/
+  operação/mês, lidos do `payload` JSONB do evento, sem precisar voltar em
+  `observacao_anuncio`). `substituir_termometro` - mesmo padrão `DELETE`+`INSERT` de
+  `analytics.contagem_eventos` (checkpoint 5).
+- `canonical` → `analytics.termometro_anuncio` (migração `1cb9bccb596b`, aplicada) +
+  `analytics/features/run_termometro_anuncio.py` (orquestra: busca estoque/eventos/domicílios,
+  monta células em Python via `_montar_linhas` - 10 testes puros cobrindo montagem, amostra
+  insuficiente, `REANUNCIO` contando como novo, células só-com-evento sem estoque atual,
+  território `None`, mês errado sendo ignorado - grava). `python -m
+  analytics.features.run_termometro_anuncio`.
+- **Limitação de dado real, documentada na própria tabela/módulo, não escondida**: rotação da
+  oferta, renovação, permanência mediana, pressão de preço e o quadrante de aquecimento ficam
+  `NULL` em toda célula hoje - todas exigem histórico (estoque de início de mês, ciclos de vida
+  completos, ou baseline de 3+ meses via `calcular_baseline`/`calcular_tendencia`, reaproveitadas
+  do checkpoint 8, mas que exigem `MINIMO_MESES_BASELINE=3`) que ainda não existe, mesmo bloqueio
+  de calendário já registrado no checkpoint 12e. `novos_anuncios`/`encerrados`/`estoque`/preço
+  são reais hoje porque não dependem de mais de um ponto no tempo.
+- **Achado real, corrigido antes de confiar no resultado**: a primeira execução do pipeline
+  contra o banco real devolveu só 14/760 células com amostra suficiente e um estoque total de
+  3.300 - suspeito, dado que só a Apolar (3.545 observações) tinha passado pela resolução entre
+  fontes (checkpoint 12c/8.1) desde a coleta completa; o lote de 5.000 da Chaves na Mão (rodado
+  no checkpoint 12d desta sessão) nunca tinha sido re-resolvido depois de gravado - confirmado
+  contando `imovel_resolvido_membro` por `fonte_id`: 3.545 Apolar, só 14 Chaves na Mão.
+  Corrigido rodando `python -m pipelines.resolucao.run_imovel_resolvido` de novo (4.999
+  candidatos pendentes → 4.348 clusters novos, ainda 0 multi-fonte - achado à parte, registrado
+  mas não investigado a fundo: as duas fontes não têm nenhuma sobreposição de imóvel físico
+  detectada ainda, plausível dado que são fontes de natureza diferente - uma imobiliária única
+  vs. um agregador multi-imobiliária). Depois da correção: **estoque total 7.648** (batendo
+  com a soma real das duas fontes), **44/760 células com amostra suficiente**.
+- **Achado real de infraestrutura de teste, corrigido**: a primeira tentativa de rodar a
+  suíte completa depois deste checkpoint quebrou 52 testes de `tests/api/` com
+  `NoReferencedTableError` - `observacao_anuncio.py` declara FK pra `dim_tipologia_imovel`/
+  `entidade`/`dim_territorio` mas nunca importava esses módulos ele mesmo, confiando em quem
+  importasse por fora já ter registrado tudo em `Base.metadata` (um registro global por
+  processo). `tests/api/conftest.py` nunca precisou de `observacao_anuncio` antes, então nunca
+  importava `dim_tipologia_imovel` - até `termometro_repository.py` (este checkpoint) importar
+  `observacao_anuncio` numa sessão de teste que também roda `create_all()` pros testes de API,
+  expondo a lacuna. Corrigido não em `conftest.py` (adicionar tabelas que a API não usa seria
+  escopo indevido), mas na fonte: `observacao_anuncio.py` e `termometro_anuncio.py` agora
+  auto-importam os módulos ORM dos quais dependem via FK, garantindo a invariante "se esta
+  classe está registrada, os alvos dos FKs dela também estão" independente de quem importa
+  primeiro. 417 testes voltaram a passar, confirmado estável em duas rodadas seguidas.
+- **Rodado contra o banco real** (depois da correção de resolução acima): 760 células
+  (bairro×tipologia×operação), estoque total 7.648, 4.999 novos anúncios/2 encerrados (mesmos
+  números do checkpoint 12e). Preços batem com o padrão já visto no FipeZAP (checkpoint 12b) -
+  Batel lidera preço de aluguel de apartamento (R$5.900 mediano), Centro lidera volume (355
+  apartamentos de aluguel em estoque, 306 salas comerciais) - mesma hierarquia de bairro cara/
+  bairro denso já confirmada por uma fonte totalmente independente.
+- 32 testes novos (`tests/analytics/features/test_anuncio_termometro.py`,
+  `test_run_termometro_anuncio.py`). Total do projeto: **417 testes Python passando**.
+  `alembic check` sem drift novo (só o já documentado desde o checkpoint 8).
+
 ## Notas operacionais
 
 - Ambiente Python único disponível na máquina é 3.14 (via `py -0p`); todas as dependências
