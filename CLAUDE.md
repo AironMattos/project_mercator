@@ -1510,6 +1510,12 @@ Regra não-negociável desta fase: um anúncio que desaparece nunca é chamado d
 oferta". `tipo_valor` (Checkpoint 11) ganha o valor `'anuncio'` para todo preço desta fase,
 sujeito à mesma trava de nunca misturar `tipo_valor` num agregado.
 
+**Texto de referência completo salvo em `docs/prompt-referencia-radar-anuncios.md`** (recebido
+do dono do projeto em 2026-08-16, depois de várias sessões citando "o prompt de referência"
+sem ele estar em lugar nenhum recuperável do repositório). A partir daqui, qualquer sessão
+retomando este produto deve ler esse arquivo primeiro, não inferir escopo a partir só deste
+CLAUDE.md.
+
 ### Checkpoint 12a - Verificação e formalização das duas fontes: **concluído, com um veredito desfavorável**
 
 As duas fontes (Apolar, Chaves na Mão) já haviam sido escolhidas pelo dono do projeto - este
@@ -1621,8 +1627,8 @@ contra o estado real do repositório, não só contra este arquivo.
   checkpoint quando o trabalho foi retomado; escrito espelhando exatamente
   `run_chavesnamao_anuncios.py` (mesma estrutura de retomada via
   `listar_identificadores_fonte_com_observacao`, mesmo padrão de lote+`pipeline_run`).
-- **Dois problemas reais pegos só ao rodar contra o ambiente/site de verdade** (nenhum dos
-  dois aparecia nos testes unitários, que usam sessão HTTP/renderizador fake):
+- **Três problemas reais pegos só ao rodar contra o ambiente/site de verdade** (nenhum
+  aparecia nos testes unitários, que usam sessão HTTP/renderizador fake):
   - Os 4 diretórios de teste novos desta fase (`tests/domain/anuncio/`, `tests/lint/`,
     `tests/infrastructure/connectors/{apolar,chavesnamao}_anuncios/`) não tinham `__init__.py`
     - diferente de todo outro diretório de teste do projeto -, o que quebrava a *coleta* do
@@ -1635,13 +1641,49 @@ contra o estado real do repositório, não só contra este arquivo.
     rodando contra o site de verdade; o teste unitário injeta uma função fake, que aceita o
     atributo sem problema). Corrigido envolvendo a chamada numa função solta antes de anexar
     `.fechar`.
-  - Depois das duas correções: os **354 testes do projeto passam** (67 novos deste checkpoint).
+  - **Violação real da seção 7 do prompt de referência, achada rodando a coleta completa em
+    produção, não em teste.** Os dois conectores (`apolar_anuncios` e `chavesnamao_anuncios`)
+    tinham um método `_salvar_html_bruto` que gravava a página HTML **inteira** (renderizada
+    ou crua) em `data/raw/<fonte>/paginas/<id>.html` - violando de frente "Raw Zone sem
+    conteúdo autoral... só campos estruturados... e um hash da URL" e "descarte de dado
+    pessoal na ingestão... nem em Raw Zone, nem em log". Achado durante a coleta completa da
+    Apolar em background: **954 páginas (270MB) já gravadas continham a string literal
+    "CRECI"** (registro profissional do corretor/anunciante, dado pessoal sob a LGPD) antes de
+    o problema ser notado e a coleta ser interrompida. Corrigido removendo
+    `_salvar_html_bruto` dos dois conectores por completo (o dado estruturado já vai pro
+    banco; não há necessidade de um dump paralelo da página inteira) - nenhum teste unitário
+    testava o conteúdo desse método, então a remoção não quebrou nada (354 testes seguem
+    passando). Todos os arquivos já gravados (`data/raw/apolar_anuncios/paginas/`,
+    `data/raw/chavesnamao_anuncios/paginas/` - este segundo, resquício pequeno de ~4MB de uma
+    tentativa anterior) foram apagados do disco local - nunca foram commitados
+    (`data/raw/` é gitignored), então não há histórico git para limpar, só o disco local. As
+    linhas já gravadas em `canonical.observacao_anuncio` não foram afetadas - só contêm campos
+    estruturados desde sempre, o problema era exclusivamente o dump de HTML em paralelo.
+    **Lição para as próximas fontes de coleta**: "não persistir X" precisa de verificação
+    ativa (grep no disco depois de uma coleta real), não só uma docstring dizendo que X não é
+    persistido - a documentação em `docs/lia-anuncios.md` já dizia a coisa certa o tempo todo,
+    o código é que não seguia.
+  - Depois das três correções: os **354 testes do projeto passam**.
+- **Resolução entre fontes (seção 8.1) ganhou o pipeline que faltava**:
+  `src/pipelines/resolucao/run_imovel_resolvido.py` (novo) - lê candidatos pendentes
+  (`imovel_resolvido_repository.listar_candidatos_resolucao_pendentes`), agrupa via
+  `domain.anuncio.resolucao.resolver_imoveis` (lógica pura, já testada desde o 12c) e grava em
+  `canonical.imovel_resolvido`/`imovel_resolvido_membro`. Faltava só isso pra fechar 8.1 de
+  ponta a ponta - o domínio e o repositório já existiam, só não havia nenhum script chamando
+  os dois juntos. Idempotente (confirmado rodando duas vezes seguidas: segunda vez processa 0
+  candidatos). **Rodado contra dado real**: 813 candidatos (só Apolar, Chaves na Mão ainda não
+  coletou) → 761 clusters, 0 com múltiplas fontes (esperado - só uma fonte coletando ainda;
+  "provar a resolução entre fontes assim que a segunda estiver coletando", seção 11 do prompt
+  de referência, fica pendente até a Chaves na Mão rodar).
 - **Rodado contra as fontes reais**: smoke test da Apolar (5 páginas, Playwright real) -
   preço/área/quartos/vagas/condomínio/andar corretos, `territorio_id` resolvido em 5 de 5
   contra `dim_territorio` (bairro já vem no slug da URL, sem geocodificação). Coleta completa
-  da Apolar (~3.549 páginas de Curitiba, ~3h a 3s/req) iniciada em background depois do smoke
-  test - decisão do dono do projeto de rodar tudo de uma vez em vez de em lotes, já que o
-  pipeline é retomável se precisar interromper.
+  da Apolar (~3.549 páginas de Curitiba, ~3h a 3s/req) iniciada em background - interrompida a
+  ~929 páginas quando a violação de Raw Zone acima foi encontrada, corrigida, e reiniciada
+  (retoma sozinha via `listar_identificadores_fonte_com_observacao`, sem re-coletar o que já
+  estava em `observacao_anuncio`). Confirmação explícita do dono do projeto (2026-08-16): a
+  coleta da Apolar pode continuar normalmente, sem esperar resposta ao pedido de autorização
+  (seção 6.1/12a do prompt de referência já previa isso como não-bloqueante).
 - **Chaves na Mão: pipeline pronto e testado, mas coleta real ainda não rodou.** O comando
   (`python -m pipelines.ingestion.run_chavesnamao_anuncios`) foi bloqueado pelo classificador
   de modo automático do Claude Code antes de qualquer requisição sair - meu palpite é a
@@ -1651,14 +1693,18 @@ contra o estado real do repositório, não só contra este arquivo.
   ferramenta específica não pôde confirmar a hipótese do bug (não chegou a rodar), então fica
   como uma suspeita razoável, não um fato verificado. Rodar essa coleta específica depende de
   uma decisão de permissão do dono do projeto (regra de permissão no Claude Code, ou rodar o
-  comando fora dele) - não tentei contornar.
+  comando fora dele) - não tentei contornar. **Achado que também vale para ela quando rodar**:
+  a violação de Raw Zone acima estava presente nos dois conectores desde o início - corrigida
+  antes de qualquer coleta real da Chaves na Mão acontecer, então essa fonte nunca chegou a
+  gravar HTML bruto em disco (só os ~4MB residuais mencionados acima, de uma tentativa parcial
+  anterior, já apagados).
 
-**Checkpoint 12b (fontes gratuitas - QuintoAndar/FipeZap) segue não iniciado** - a sessão que
-construiu 12c/12d avançou direto para o domínio/conectores das duas fontes pagas em vez de
-seguir a ordem 12a→12b→12c do prompt de referência; motivo não registrado em nenhum lugar
-recuperável (provavelmente decisão do dono do projeto na hora, não documentada). Não
-reordenado nem questionado aqui - só registrado como está, pra quem retomar não estranhar a
-lacuna.
+**Checkpoint 12b (fontes gratuitas - QuintoAndar/FipeZap) segue não iniciado.** Não é mais uma
+lacuna sem explicação: o prompt de referência (seção 12, texto do checkpoint 12a) diz
+explicitamente "este checkpoint [12a] está satisfeito para as duas fontes; o 12d pode
+prosseguir para ambas" - ou seja, o próprio prompt já antecipava pular direto de 12a para
+12c/12d sem esperar o 12b, porque fontes gratuitas de contexto (QuintoAndar/FipeZap) não
+bloqueiam nada da coleta paga. Fica como próximo passo natural, não como algo fora de ordem.
 
 ## Notas operacionais
 

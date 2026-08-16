@@ -190,7 +190,6 @@ class ApolarAnunciosConnector:
                     continue
                 buscados_nesta_chamada += 1
 
-                self._salvar_html_bruto(campos_url.id_anuncio, html)
                 campos_pagina = parse_pagina_detalhe(html)
 
                 yield self._montar_registro(
@@ -256,12 +255,6 @@ class ApolarAnunciosConnector:
             bairro_slug=campos_url.bairro_slug,
             territorio_id=territorio_id,
         )
-
-    def _salvar_html_bruto(self, id_anuncio: str, html: str) -> None:
-        destino_dir = self._raw_dir / "paginas"
-        destino_dir.mkdir(parents=True, exist_ok=True)
-        (destino_dir / f"{id_anuncio}.html").write_text(html, encoding="utf-8")
-
 
 def hash_identificador_anuncio(fonte_id: str, id_anuncio: str) -> str:
     return hashlib.sha256(f"{fonte_id}:{id_anuncio}".encode("utf-8")).hexdigest()
