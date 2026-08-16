@@ -51,6 +51,98 @@ class IndicadorAluguelMercado:
             raise ValueError("fonte_id não pode ser vazio")
 
 
+# Índice FipeZAP (checkpoint 12b) publica dois relatórios mensais
+# separados por operação - nunca combine variação/preço de venda com o
+# de locação no mesmo agregado, mesmo espírito de nunca misturar
+# tipo_valor (domain.valuation) ou operacao (domain.anuncio).
+OPERACOES_FIPEZAP_VALIDAS = frozenset({"venda", "locacao"})
+
+
+@dataclass(frozen=True)
+class IndicadorFipezapCidade:
+    """Leitura mensal do Índice FipeZAP para uma cidade inteira (seção 9
+    do prompt de referência do Radar de Anúncios, checkpoint 12b) - a
+    "segunda régua" de validação para o preço pedido calculado a partir
+    dos anúncios coletados (Apolar/Chaves na Mão).
+
+    **Nunca exposta via API pública nem redistribuída** - a Fipe não
+    publica licença de redistribuição para este dado (só o PDF mensal em
+    si, de acesso público); uso é estritamente interno, para comparar
+    contra o preço pedido mediano calculado pelo produto. Essa restrição
+    é responsabilidade da camada de API/UI (nunca construir um endpoint
+    público que devolva isto), não algo que este dataclass force
+    sozinho.
+    """
+
+    cidade: str
+    operacao: str
+    periodo_referencia: date
+    preco_medio_m2: float
+    fonte_id: str
+    snapshot_ref: str
+    variacao_mensal: float | None = None
+    variacao_acumulada_ano: float | None = None
+    variacao_12m: float | None = None
+
+    def __post_init__(self) -> None:
+        if not self.cidade:
+            raise ValueError("cidade não pode ser vazia")
+        if self.operacao not in OPERACOES_FIPEZAP_VALIDAS:
+            raise ValueError(
+                f"operacao inválida: {self.operacao!r}. "
+                f"Deve ser uma de {sorted(OPERACOES_FIPEZAP_VALIDAS)}"
+            )
+        if self.preco_medio_m2 < 0:
+            raise ValueError("preco_medio_m2 não pode ser negativo")
+        if not self.fonte_id:
+            raise ValueError("fonte_id não pode ser vazio")
+
+
+@dataclass(frozen=True)
+class IndicadorFipezapBairro:
+    """Um dos "bairros mais representativos" de uma cidade no Índice
+    FipeZAP (checkpoint 12b, mesma restrição de uso interno do
+    `IndicadorFipezapCidade` acima). A própria Fipe declara, no rodapé do
+    relatório, que não publica dado mais granular que esta lista curta -
+    "a Fipe não divulga informações detalhadas ou tabelas de preço médio
+    por zona, distrito ou bairro" - então este é o teto de granularidade
+    disponível na fonte, não uma amostra arbitrária escolhida por este
+    projeto.
+
+    `bairro_nome` é o nome exatamente como impresso no PDF - achado real
+    do checkpoint 12b: o relatório às vezes trunca nomes longos com "…"
+    (ex.: "CIDADE INDUSTRIAL DE…" em vez de "CIDADE INDUSTRIAL DE
+    CURITIBA"), inconsistentemente entre venda e locação do mesmo mês.
+    `territorio_id` é melhor esforço (None quando não resolvido, nunca
+    inventado - mesmo tratamento de bairro não resolvido do resto do
+    projeto)."""
+
+    cidade: str
+    operacao: str
+    periodo_referencia: date
+    bairro_nome: str
+    preco_medio_m2: float
+    fonte_id: str
+    snapshot_ref: str
+    variacao_12m: float | None = None
+    territorio_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.cidade:
+            raise ValueError("cidade não pode ser vazia")
+        if self.operacao not in OPERACOES_FIPEZAP_VALIDAS:
+            raise ValueError(
+                f"operacao inválida: {self.operacao!r}. "
+                f"Deve ser uma de {sorted(OPERACOES_FIPEZAP_VALIDAS)}"
+            )
+        if not self.bairro_nome:
+            raise ValueError("bairro_nome não pode ser vazio")
+        if self.preco_medio_m2 < 0:
+            raise ValueError("preco_medio_m2 não pode ser negativo")
+        if not self.fonte_id:
+            raise ValueError("fonte_id não pode ser vazio")
+
+
 @dataclass(frozen=True)
 class IndicadorCensitarioSetor:
     """Um setor censitário do Censo 2022 (agregados básicos - domicílios/

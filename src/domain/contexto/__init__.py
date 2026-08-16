@@ -1,3 +1,15 @@
-from domain.contexto.models import IndicadorAluguelMercado, IndicadorCensitarioSetor
+from domain.contexto.models import (
+    OPERACOES_FIPEZAP_VALIDAS,
+    IndicadorAluguelMercado,
+    IndicadorCensitarioSetor,
+    IndicadorFipezapBairro,
+    IndicadorFipezapCidade,
+)
 
-__all__ = ["IndicadorAluguelMercado", "IndicadorCensitarioSetor"]
+__all__ = [
+    "OPERACOES_FIPEZAP_VALIDAS",
+    "IndicadorAluguelMercado",
+    "IndicadorCensitarioSetor",
+    "IndicadorFipezapBairro",
+    "IndicadorFipezapCidade",
+]

@@ -29,6 +29,7 @@ from infrastructure.database.orm import contexto_quintoandar_aluguel  # noqa: F4
 from infrastructure.database.orm import contexto_censo_setor  # noqa: F401
 from infrastructure.database.orm import dim_tipologia_imovel  # noqa: F401
 from infrastructure.database.orm import observacao_anuncio  # noqa: F401
+from infrastructure.database.orm import contexto_fipezap  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

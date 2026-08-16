@@ -32,6 +32,9 @@ dependencies = [
     # confirmada com o dono do projeto: Playwright só pra este conector,
     # Chaves na Mão continua HTTP puro (server-rendered).
     "playwright>=1.55",
+    # Radar de Anúncios (checkpoint 12b) - conector fipezap, informe
+    # mensal só em PDF (sem CSV/API pública).
+    "pdfplumber>=0.11",
 ]
 
 [project.optional-dependencies]

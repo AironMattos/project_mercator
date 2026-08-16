@@ -1690,27 +1690,115 @@ contra o estado real do repositório, não só contra este arquivo.
   (2026-08-16): a coleta da Apolar pode continuar normalmente, sem esperar resposta ao pedido
   de autorização
   (seção 6.1/12a do prompt de referência já previa isso como não-bloqueante).
-- **Chaves na Mão: pipeline pronto e testado, mas coleta real ainda não rodou.** O comando
-  (`python -m pipelines.ingestion.run_chavesnamao_anuncios`) foi bloqueado pelo classificador
-  de modo automático do Claude Code antes de qualquer requisição sair - meu palpite é a
-  cláusula de Termos de Uso que proíbe "bots, scripts automatizados, ferramentas de
-  raspagem" (`docs/fontes-anuncios.md`, seção 2), mesmo com a decisão do dono do projeto de
-  2026-08-15 já registrada de prosseguir assumindo o risco. Diferente da Apolar, essa
-  ferramenta específica não pôde confirmar a hipótese do bug (não chegou a rodar), então fica
-  como uma suspeita razoável, não um fato verificado. Rodar essa coleta específica depende de
-  uma decisão de permissão do dono do projeto (regra de permissão no Claude Code, ou rodar o
-  comando fora dele) - não tentei contornar. **Achado que também vale para ela quando rodar**:
-  a violação de Raw Zone acima estava presente nos dois conectores desde o início - corrigida
-  antes de qualquer coleta real da Chaves na Mão acontecer, então essa fonte nunca chegou a
-  gravar HTML bruto em disco (só os ~4MB residuais mencionados acima, de uma tentativa parcial
-  anterior, já apagados).
+- **Chaves na Mão: bloqueio superado, coleta real em andamento.** O bloqueio original do
+  classificador de modo automático do Claude Code (palpite: a cláusula de Termos de Uso que
+  proíbe "bots, scripts automatizados, ferramentas de raspagem", `docs/fontes-anuncios.md`,
+  seção 2) parou de acontecer depois que o dono do projeto obteve **autorização direta das
+  duas empresas por conversa** (2026-08-16, registrado em `docs/fontes-anuncios.md` seção 2.1)
+  - confirma que o palpite provavelmente estava certo, já que a mesma ferramenta que bloqueava
+  antes passou a permitir sem nenhuma mudança de código. Smoke test (5 páginas) rodou limpo:
+  preço/área/quartos/vagas/condomínio/IPTU corretos, bairro resolvido em 5 de 5, nenhum HTML
+  bruto gravado (a correção da violação de Raw Zone, descrita acima, vale igualmente para os
+  dois conectores). Descoberta real de escala: **81.934 anúncios de Curitiba** nos sitemaps -
+  a 3s/req, coletar tudo levaria ~68h; um lote de 5.000 páginas (~4h) foi iniciado em
+  background por decisão do dono do projeto, e segue rodando - resto pendente de lotes
+  futuros, mesmo padrão retomável do pipeline (`listar_identificadores_fonte_com_observacao`).
 
-**Checkpoint 12b (fontes gratuitas - QuintoAndar/FipeZap) segue não iniciado.** Não é mais uma
-lacuna sem explicação: o prompt de referência (seção 12, texto do checkpoint 12a) diz
-explicitamente "este checkpoint [12a] está satisfeito para as duas fontes; o 12d pode
-prosseguir para ambas" - ou seja, o próprio prompt já antecipava pular direto de 12a para
-12c/12d sem esperar o 12b, porque fontes gratuitas de contexto (QuintoAndar/FipeZap) não
-bloqueiam nada da coleta paga. Fica como próximo passo natural, não como algo fora de ordem.
+### Checkpoint 12b - Fontes gratuitas (QuintoAndar/FipeZAP): **concluído**
+
+Antes desta sessão, a lacuna do 12b ("segue não iniciado") tinha um motivo não registrado -
+esclarecido depois que o dono do projeto passou o texto completo do prompt de referência
+(agora salvo em `docs/prompt-referencia-radar-anuncios.md`): a própria seção 12 (texto do
+checkpoint 12a) já dizia "este checkpoint está satisfeito para as duas fontes; o 12d pode
+prosseguir para ambas" - a sessão anterior não pulou o 12b por engano, o prompt já previa isso.
+
+- **QuintoAndar - reaproveitamento puro, sem código novo**: o Índice QuintoAndar/Imovelweb de
+  aluguel (`mkt.quintoandar.com.br/dados`, seção 9) é exatamente a mesma fonte já ingerida no
+  Radar Imobiliário (checkpoint 11d,
+  `infrastructure/connectors/quintoandar_aluguel`/`canonical.contexto_quintoandar_aluguel`) -
+  princípio 1 do projeto (substrato compartilhado) aplicado de verdade, não só citado.
+  `python -m pipelines.ingestion.run_quintoandar_aluguel` rodado de novo pra confirmar
+  atualidade: **0 leituras novas gravadas** - achado real, não falha do pipeline: o CSV público
+  da fonte não tem dado além de agosto/2025 (confirmado comparando `MAX(periodo_referencia)`
+  antes/depois do re-run, idêntico) - a série está travada há um ano na origem, não no nosso
+  lado. Registrado aqui como limitação de dado real, não investigado mais a fundo (não é um
+  conector nosso que quebrou).
+- **FipeZAP - conector novo** (`src/infrastructure/connectors/fipezap/`) - informe mensal só em
+  PDF (`downloads.fipe.org.br/indices/fipezap/fipezap-<AAAAMM>-residencial-<venda|locacao>.pdf`),
+  sem CSV nem API. Verificação técnica feita antes de escrever código (mesma disciplina do
+  checkpoint 12a): `downloads.fipe.org.br` não publica `robots.txt` (redireciona pra uma página
+  404 do site principal - sem restrição declarada); o download só funciona com um User-Agent
+  próprio - o padrão do `requests` recebe 403 do WAF da Fipe (achado real, identificação honesta
+  da seção 7 já resolve isso, não é evasão de bloqueio).
+  - `src/domain/contexto/models.py` ganhou `IndicadorFipezapCidade`/`IndicadorFipezapBairro` -
+    **uso estritamente interno, documentado na própria docstring**: a Fipe não publica licença
+    de redistribuição (seção 9: "use internamente para validação... não redistribua sem
+    escrever pra Fipe antes") - nenhuma rota de API pública lê essas tabelas.
+  - `parsing.py` (puro, sem pdfplumber, testável com texto simples) - **achado real que mudou o
+    desenho**: a tabela "capitais monitoradas" da mesma página, extraída via
+    `page.extract_text()`, sai com a ordem dos caracteres embaralhada em alguns meses/operações
+    (largura de coluna variável do PDF real) - confirmado comparando o relatório de venda
+    (extrai limpo) contra o de locação do mesmo mês (embaralhado) de julho/2026. Contornado
+    lendo os KPIs de cidade da prosa "DESTAQUES DO MÊS" (sempre limpa nos dois relatórios) em
+    vez da tabela, via regex `Cidade\(([+-]X,XX%)\)` - a ausência de sinal `+`/`-` na
+    rentabilidade do aluguel (a única outra métrica parentética na mesma prosa) já filtra esse
+    quinto número sem tratamento especial.
+  - Segundo achado real: a lista de "bairros mais representativos" (a própria Fipe declara no
+    rodapé que não publica nada mais granular - "a Fipe não divulga informações detalhadas ou
+    tabelas de preço médio por zona, distrito ou bairro") às vezes vem com rótulo de legenda de
+    gráfico colado na mesma linha de uma linha de dado real (ex.: "Preço médio AGUA VERDE R$
+    12.475 /m² +2,2%" - "Preço médio" é rótulo do gráfico ao lado, "AGUA VERDE..." é o dado).
+    Regex de extração busca (não ancora no início da linha) e só aceita maiúscula/espaço no
+    nome do bairro, o que já descarta o rótulo (tem minúscula) sem tratamento especial.
+  - Terceiro achado real: nomes de bairro longos às vezes saem truncados com "…" no relatório
+    de locação (`"CIDADE INDUSTRIAL DE…"`) mas não no de venda do mesmo mês
+    (`"CIDADE INDUSTRIAL DE CURITIBA"` completo) - inconsistente até entre os dois relatórios
+    do mesmo mês. `resolver_territorio_bairro` tenta o nome como veio; se truncado, casa por
+    prefixo de slug contra `dim_territorio` e só resolve quando exatamente um bairro bate -
+    prefixo ambíguo fica `None`, nunca um palpite.
+  - `connector.py`: `fetch()` resolve o mês mais recente publicado tentando o corrente e
+    retrocedendo (até 4 meses) - **achado real de robustez, encontrado rodando contra o site de
+    verdade**: o mês corrente (ainda não publicado) às vezes devolve `403` em vez de `404` de
+    forma inconsistente entre requisições (mesma URL, mesma sessão, minutos de diferença - um
+    request manual isolado pra `202607` respondia `200` normalmente enquanto o pipeline, rodando
+    logo em seguida, recebia `403` até para esse mesmo mês já publicado). Corrigido em duas
+    camadas: backoff exponencial (`RETENTATIVAS_MAXIMAS = 3`, seção 7 do prompt de referência,
+    "Backoff exponencial em erro") dentro de `_baixar_com_retentativa`, e - mais importante -
+    qualquer falha persistente num mês (404 definitivo OU erro esgotado depois do retry) leva
+    `_tentar_baixar_mes` a devolver `None` e `fetch()` cai pro mês anterior, em vez de abortar a
+    busca inteira. Sem essa segunda camada, um 403 transitório no mês mais recente derrubava o
+    conector por completo mesmo com meses mais antigos, já publicados, saudáveis.
+  - `_extrator_paginas` injetável no `__init__` (mesmo padrão do `renderizador` de
+    `apolar_anuncios`) - testa a orquestração de `normalize()` sem precisar construir um PDF
+    binário de verdade.
+  - `canonical.contexto_fipezap_cidade`/`contexto_fipezap_bairro` (migração `7dbe60ef606e`,
+    aplicada) + `contexto_fipezap_repository.py` (idempotente por chave natural, mesmo padrão
+    de `contexto_quintoandar_repository`). `pipelines/ingestion/run_fipezap.py` orquestra
+    fetch→normalize→grava.
+  - **Rodado contra a fonte real**: os dois PDFs de julho/2026 (venda + locação) baixados e
+    verificados manualmente byte a byte contra o que a Fipe publica antes de escrever o parser.
+    Depois de escrever o pipeline completo, uma tentativa de rodar `fetch()` de ponta a ponta
+    contra o site ao vivo esbarrou no achado de `403` acima se repetindo em todos os 4 meses
+    tentados (bem mais consistente que um blip isolado - sinal de que o volume de requisições
+    desta sessão de investigação/desenvolvimento provavelmente disparou um rate-limit
+    temporário do WAF da Fipe, não um bloqueio permanente). Decisão consciente de não insistir
+    batendo no domínio (ritmo conservador, seção 7) - em vez disso, **`normalize()` +
+    persistência foram verificados de ponta a ponta com os dois PDFs de julho/2026 já baixados
+    localmente** (bypass só do `fetch()`/rede, não do parsing nem da gravação): 2 indicadores de
+    cidade (venda R$11.761/m² +0,08%/+0,32%/+3,85%; locação R$48,91/m² +0,57%/+5,14%/+9,17%,
+    todos batendo com leitura manual do PDF) e 20 indicadores de bairro (10 por operação),
+    **100% (20/20) com `territorio_id` resolvido** contra `dim_territorio` - incluindo o caso
+    truncado "CIDADE INDUSTRIAL DE…" resolvido corretamente por prefixo. 22 registros gravados
+    no banco real, `pipeline_run` registrado manualmente pra refletir essa execução híbrida.
+    Rodar `python -m pipelines.ingestion.run_fipezap` de ponta a ponta contra a rede (sem
+    nenhum PDF pré-baixado) fica pendente pra quando o rate-limit da Fipe arrefecer - o código
+    já tem retry/fallback de mês pra lidar com isso sozinho quando isso acontecer.
+- 29 testes novos (`tests/domain/contexto/` ampliado, `tests/infrastructure/connectors/fipezap/`
+  novo - parsing puro com texto real extraído dos PDFs reais, conector com sessão HTTP fake).
+  Total do projeto: **385 testes Python passando**. `alembic check` sem drift novo (só o já
+  documentado desde o checkpoint 8). Trabalho deste checkpoint rodou em paralelo com a coleta
+  da Chaves na Mão (checkpoint 12d, ver acima) em background, sem conflito - processos e
+  tabelas independentes.
 
 ## Notas operacionais
 
