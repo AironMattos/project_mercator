@@ -93,6 +93,9 @@ def consultar_agregado_por_bairro(session: Session) -> list[dict]:
             func.sum(tabela.domicilios_particulares_ocupados).label(
                 "domicilios_particulares_ocupados"
             ),
+            func.sum(tabela.domicilios_particulares_vagos).label(
+                "domicilios_particulares_vagos"
+            ),
             func.sum(tabela.area_km2).label("area_km2"),
             func.count().label("setores_agregados"),
         )
@@ -112,6 +115,9 @@ def consultar_agregado_por_bairro(session: Session) -> list[dict]:
                 "domicilios_total": domicilios_total,
                 "domicilios_particulares_ocupados": int(
                     row.domicilios_particulares_ocupados or 0
+                ),
+                "domicilios_particulares_vagos": int(
+                    row.domicilios_particulares_vagos or 0
                 ),
                 "area_km2": area_km2,
                 "densidade_domicilios_km2": densidade,

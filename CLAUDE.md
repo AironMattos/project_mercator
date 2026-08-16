@@ -2028,6 +2028,63 @@ sobre o substrato compartilhado (`dim_territorio`), não integração nova.
   Python passando**. `alembic check` sem drift novo (nenhuma tabela nova neste checkpoint -
   tudo lido ao vivo, mesmo raciocínio de `eventos_no_raio`).
 
+### Checkpoint 12h - Pressão especulativa: **concluído para o que dado real sustenta hoje**
+
+Seção 5 do prompt de referência - 5 indicadores mensuráveis, cada um nomeado pelo que é
+("o produto não pode chamar nada de especulação"). `src/analytics/features/
+pressao_especulativa.py` (puro, 5 dataclasses + 5 funções, 15 testes) +
+`infrastructure/database/repositories/pressao_especulativa_repository.py` (consultas reais) +
+`run_pressao_especulativa.py` (relatório, mesmo padrão de `cross/run_leitura_cruzada.py` - não
+grava nada, sem endpoint/tela ainda).
+
+- **Indicador 1 (reanúncio com preço maior)**: `calcular_taxa_reanuncio` - taxa =
+  `REANUNCIO ÷ ANUNCIO_ENCERRADO` na mesma janela de `domain.anuncio.resolucao.
+  JANELA_PADRAO_DIAS` (reaproveitada, não um número novo); mediana do incremento usa só as
+  variações **positivas** dos `REANUNCIO` (a seção 5 pede especificamente "preço maior", não
+  toda variação de reanúncio).
+- **Indicador 2 (preço subindo sem contrapartida física)**: `avaliar_preco_sem_contrapartida_fisica`
+  cruza variação de preço (baseline) com `ALVARA_APROVADO`/`OBRA_CONCLUIDA`/
+  `ZONEAMENTO_ALTERADO` do Radar Imobiliário no bairro - "aqui o Checkpoint 11 finalmente vira
+  insumo analítico, não decoração" (seção 5), literal.
+- **Indicador 3 (oferta alta com ocupação baixa)**: `calcular_oferta_por_domicilio_vago` -
+  estoque de anúncios ativos (cluster resolvido, nunca conta duplicado) ÷ domicílios
+  particulares vagos do Censo 2022. **Achado real, corrigido antes de rodar**:
+  `contexto_censo_repository.consultar_agregado_por_bairro` (Radar Imobiliário, checkpoint
+  11e) somava população/domicílios totais/ocupados/área, mas nunca `domicilios_particulares_vagos`
+  - a coluna já existia em `ContextoCensoSetor` desde o checkpoint 11d, só não estava na
+  agregação por bairro porque nenhum indicador tinha precisado dela até agora. Estendida
+  aditivamente (chave nova no dict de retorno, `CensoBairroOut` ignora chaves extras por
+  padrão do Pydantic - conferido que os 12 testes de `tests/api/test_imoveis.py` continuam
+  passando antes de seguir).
+- **Indicador 4 (concentração de anunciante)**: `calcular_concentracao_ofertante` (% dos
+  anúncios ativos vindo dos 5 ofertantes mais frequentes, nunca o hash em si na saída - só a
+  contagem). **Achado real, documentado, não escondido**: `ofertante_hash` existe no schema
+  desde o checkpoint 12c mas **nenhum dos dois conectores o popula** - `apolar_anuncios`/
+  `chavesnamao_anuncios` nunca extraem/hasheiam identificação de anunciante do HTML. Este
+  indicador sempre reporta `amostra_insuficiente` (0 ofertantes) até isso ser corrigido nos
+  conectores - lacuna de coleta, não bug desta consulta nem deste checkpoint.
+- **Indicador 5 (descolamento entre pedido e contratado)**: `calcular_descolamento_pedido_contratado`
+  - único dos 5 sem nenhum bloqueio de calendário, porque não depende de baseline nem de
+  histórico de anúncio, só de um snapshot atual (preço pedido mediano de aluguel por m², cidade
+  inteira) contra o índice QuintoAndar (checkpoint 12b). **Achado real a interpretar com
+  cautela**: razão calculada = 0,93 (preço pedido R$42,58/m² **abaixo** do índice QuintoAndar de
+  R$45,99/m²) - resultado contraintuitivo à primeira vista (esperava-se pedido ≥ contratado),
+  mas o índice QuintoAndar usado está travado em ago/2025 (achado do checkpoint 12b: a fonte
+  não publica dado mais recente) enquanto o preço pedido é de ago/2026 - **um ano de defasagem
+  entre as duas pontas da comparação**, não uma leitura limpa do mesmo período. Registrado
+  como está, sem ajustar o número pra "parecer certo" - a razão calculada bate com os dados reais
+  disponíveis, a ressalva de defasagem temporal é que precisa acompanhar o número em qualquer
+  tela futura (checkpoint 12i).
+- **Rodado contra o banco real**: indicador 1 (0 reanúncios / 2 encerrados, taxa 0,0 - mesmos 2
+  eventos do checkpoint 12e); indicador 2 (Centro e Batel têm `houve_contrapartida=True` via
+  eventos reais de obra, variação de preço aguardando baseline); indicador 3 (Batel lidera com
+  0,379 estoque/domicílio vago, Centro tem o maior estoque absoluto - 1.078 - mas razão menor
+  por ter mais domicílios vagos também); indicador 4 (0, confirma o achado de coleta);
+  indicador 5 (razão 0,93, conforme acima).
+- 15 testes novos (`tests/analytics/features/test_pressao_especulativa.py`). Total do projeto:
+  **449 testes Python passando**. `alembic check` sem drift novo (nenhuma tabela nova - tudo
+  lido ao vivo ou de tabelas já existentes).
+
 ## Notas operacionais
 
 - Ambiente Python único disponível na máquina é 3.14 (via `py -0p`); todas as dependências
