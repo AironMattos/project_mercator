@@ -1962,6 +1962,72 @@ histórico têm um número quando não têm.
   `test_run_termometro_anuncio.py`). Total do projeto: **417 testes Python passando**.
   `alembic check` sem drift novo (só o já documentado desde o checkpoint 8).
 
+### Checkpoint 12g - Leitura cruzada: **concluído para o que dado real sustenta hoje**
+
+Seção 3 do prompt de referência ("a seção que diferencia o produto"). Código vive em
+`src/analytics/features/cross/` e `infrastructure/database/repositories/cross_repository.py` -
+fora de `commerce/` e de qualquer pacote específico do Radar de Anúncios, porque é leitura
+sobre o substrato compartilhado (`dim_territorio`), não integração nova.
+
+- **3.1 Defasagem cruzada** (`cross/defasagem.py`, puro) - `calcular_correlacao_cruzada`
+  testa `2×lag_maximo+1` defasagens (padrão 12, então 25 no total) via correlação de Pearson,
+  com **intervalo de confiança corrigido por Bonferroni** (`n_testes` explícito, nunca
+  inferido às escondidas - transformação de Fisher + `statistics.NormalDist().inv_cdf(...)`
+  pro z crítico, sem precisar de scipy) - primeira trava obrigatória da seção 3.1
+  ("aplique correção para múltiplas comparações... publique intervalo de confiança").
+  `PISO_MINIMO_MESES_SOBREPOSTOS = 12` - terceira trava (piso de amostra). Série constante
+  (variância zero) fica indisponível, nunca vira `r=0` (zero afirmaria "sem relação", que é
+  informação diferente de "não dá pra medir"). `cross/servico_defasagem.py` implementa a
+  primeira trava por completo: `analisar_defasagem_por_bairro` **só roda se
+  `analisar_defasagem_cidade` achou uma defasagem significativa** - "resultado válido, não uma
+  falha" quando não acha, mesma linguagem do checkpoint 12e/12f. 11 testes (inclui um caso
+  sintético com lag verdadeiro conhecido - série não-periódica via `sin(i)` com `i` inteiro,
+  índice não múltiplo de π, pra não colidir com o próprio lag testado por aliasing - onde a
+  correlação encontrada bate exatamente com o lag construído, `r≈1.0`).
+- **3.2 Quadrante cruzado** (`cross/quadrante_cruzado.py`, puro) - 4 rótulos descritivos
+  (`movimento_nos_dois_lados`/`comercio_cresce_oferta_escassa`/`oferta_cresce_comercio_parado`/
+  `movimento_baixo_nos_dois_lados`), nunca avaliativos - `None` quando falta qualquer um dos
+  dois eixos. 6 testes.
+- **3.3 Coincidência espacial fina** (`cross_repository.consultar_coincidencia_espacial`) -
+  **achado real que mudou o desenho**: nenhuma entidade `tipo_entidade='anuncio_imovel'` tem
+  linha em `canonical.geolocalizacao_entidade` (0 confirmado por query direta) - o Radar de
+  Anúncios nunca geocodificou nada, só resolve bairro (checkpoint 12c/12d). Isso torna "raio de
+  N metros" literal impossível pro lado do anúncio hoje. Em vez de inventar um ponto aproximado
+  (ex.: centroide do bairro fingindo ser geocodificação), o resultado reporta os dois lados com
+  **granularidades explicitamente diferentes**: comércio via raio real (reaproveita
+  `eventos_no_raio`, checkpoint 9d/11d, ponto-a-ponto de verdade) e anúncio por bairro inteiro
+  (resolvido via `ST_Contains` do ponto contra `dim_territorio.geometria`) - nunca escondido
+  atrás de um número só, mesma disciplina de transparência de fonte/granularidade já usada em
+  `/imoveis/contexto` (Radar Imobiliário) e na seção 1.2 (Radar de Anúncios).
+- **Achado real, corrigido antes de confiar em qualquer resultado** - o mais importante deste
+  checkpoint: a primeira execução do relatório contra o banco real (`run_leitura_cruzada.py`)
+  encontrou uma defasagem "significativa" em lag=0 (r=-0,568, IC95 não continha zero) - exame
+  manual mostrou que era exatamente a correlação espúria que a seção 3.1 pede pra evitar.
+  Causa: `series_novos_anuncios_todos_bairros`/`serie_novos_anuncios_cidade` zero-preenchiam a
+  série de anúncio (~40 meses), mas a série real só tem **1 mês** de profundidade (mesmo
+  bloqueio de calendário do checkpoint 12e/12f) - os ~39 zeros fabricados criavam contraste
+  artificial contra o único mês real, não um sinal de verdade. Violava um princípio que o
+  próprio projeto já tinha estabelecido em outro lugar (`feature_repository.
+  consultar_saldo_mensal_todos_bairros`: "ausência de mês significa 'não processamos essa
+  comparação', não 'zero'") - só não tinha sido aplicado aqui na primeira versão. Corrigido
+  removendo o zero-fill dessas duas funções (mês sem evento de anúncio simplesmente não entra
+  na série, deixando `_alinhar_series` pareá-la corretamente só onde há dado real dos dois
+  lados) - depois da correção, o relatório passou a reportar corretamente "amostra
+  insuficiente" e nenhuma defasagem por bairro é calculada, exatamente o resultado honesto
+  esperado dado o histórico real disponível.
+- `cross/run_leitura_cruzada.py` - relatório (não grava nada, não há endpoint/tela ainda,
+  checkpoint 12i) que imprime os dois resultados. **Rodado contra o banco real**: 3.1 reporta
+  corretamente "nenhuma defasagem significativa - amostra insuficiente" (40 meses de comércio
+  com dado real via `contagem_inicio_atividade`, só 1 mês de anúncio); 3.3 no ponto já usado
+  pela busca por raio do checkpoint 9d (AV. PRESIDENTE WENCESLAU BRAZ, 1893) devolve 818
+  aberturas/165 desaparecimentos de comércio num raio de 1km (últimos 12 meses) e 942 novos
+  anúncios no bairro Centro (que contém o ponto) - números plausíveis, Centro já confirmado
+  como o bairro de maior volume tanto no checkpoint 12f quanto aqui.
+- 17 testes novos (`tests/analytics/features/cross/` - `test_defasagem.py`,
+  `test_servico_defasagem.py`, `test_quadrante_cruzado.py`). Total do projeto: **434 testes
+  Python passando**. `alembic check` sem drift novo (nenhuma tabela nova neste checkpoint -
+  tudo lido ao vivo, mesmo raciocínio de `eventos_no_raio`).
+
 ## Notas operacionais
 
 - Ambiente Python único disponível na máquina é 3.14 (via `py -0p`); todas as dependências
