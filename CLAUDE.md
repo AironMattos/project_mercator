@@ -1690,7 +1690,7 @@ contra o estado real do repositório, não só contra este arquivo.
   (2026-08-16): a coleta da Apolar pode continuar normalmente, sem esperar resposta ao pedido
   de autorização
   (seção 6.1/12a do prompt de referência já previa isso como não-bloqueante).
-- **Chaves na Mão: bloqueio superado, coleta real em andamento.** O bloqueio original do
+- **Chaves na Mão: bloqueio superado, primeiro lote real concluído.** O bloqueio original do
   classificador de modo automático do Claude Code (palpite: a cláusula de Termos de Uso que
   proíbe "bots, scripts automatizados, ferramentas de raspagem", `docs/fontes-anuncios.md`,
   seção 2) parou de acontecer depois que o dono do projeto obteve **autorização direta das
@@ -1700,9 +1700,16 @@ contra o estado real do repositório, não só contra este arquivo.
   preço/área/quartos/vagas/condomínio/IPTU corretos, bairro resolvido em 5 de 5, nenhum HTML
   bruto gravado (a correção da violação de Raw Zone, descrita acima, vale igualmente para os
   dois conectores). Descoberta real de escala: **81.934 anúncios de Curitiba** nos sitemaps -
-  a 3s/req, coletar tudo levaria ~68h; um lote de 5.000 páginas (~4h) foi iniciado em
-  background por decisão do dono do projeto, e segue rodando - resto pendente de lotes
-  futuros, mesmo padrão retomável do pipeline (`listar_identificadores_fonte_com_observacao`).
+  a 3s/req, coletar tudo levaria ~68h; um lote de 5.000 páginas (~4h) foi rodado em background
+  por decisão do dono do projeto. **Concluído com sucesso**: 5.000 lidos, 5.000 gravados,
+  status `sucesso` no `pipeline_run` - **5.013 observações totais de `chavesnamao_anuncios`**
+  no banco (5 do smoke test + 5.000 do lote, mais um pequeno resto de reprocessamento de
+  URLs já vistas), **95,9% (4.807) com `territorio_id` resolvido**. Volume de URLs "fora do
+  padrão esperado" ao longo do lote (ex.: "ponto comercial" sem contagem de quartos no slug)
+  ignoradas como já documentado no checkpoint 12d - não interrompeu a coleta. Resto dos
+  ~77 mil anúncios ainda não coletados fica para lotes futuros, mesmo padrão retomável do
+  pipeline (`listar_identificadores_fonte_com_observacao`) - decisão de quando rodar o
+  próximo lote é do dono do projeto.
 
 ### Checkpoint 12b - Fontes gratuitas (QuintoAndar/FipeZAP): **concluído**
 
