@@ -1671,18 +1671,24 @@ contra o estado real do repositório, não só contra este arquivo.
   `canonical.imovel_resolvido`/`imovel_resolvido_membro`. Faltava só isso pra fechar 8.1 de
   ponta a ponta - o domínio e o repositório já existiam, só não havia nenhum script chamando
   os dois juntos. Idempotente (confirmado rodando duas vezes seguidas: segunda vez processa 0
-  candidatos). **Rodado contra dado real**: 813 candidatos (só Apolar, Chaves na Mão ainda não
-  coletou) → 761 clusters, 0 com múltiplas fontes (esperado - só uma fonte coletando ainda;
-  "provar a resolução entre fontes assim que a segunda estiver coletando", seção 11 do prompt
-  de referência, fica pendente até a Chaves na Mão rodar).
-- **Rodado contra as fontes reais**: smoke test da Apolar (5 páginas, Playwright real) -
-  preço/área/quartos/vagas/condomínio/andar corretos, `territorio_id` resolvido em 5 de 5
-  contra `dim_territorio` (bairro já vem no slug da URL, sem geocodificação). Coleta completa
-  da Apolar (~3.549 páginas de Curitiba, ~3h a 3s/req) iniciada em background - interrompida a
-  ~929 páginas quando a violação de Raw Zone acima foi encontrada, corrigida, e reiniciada
-  (retoma sozinha via `listar_identificadores_fonte_com_observacao`, sem re-coletar o que já
-  estava em `observacao_anuncio`). Confirmação explícita do dono do projeto (2026-08-16): a
-  coleta da Apolar pode continuar normalmente, sem esperar resposta ao pedido de autorização
+  candidatos). **Rodado contra dado real, em duas passagens** (antes e depois da coleta
+  completa da Apolar terminar): 813 candidatos → 761 clusters, depois mais 2.740 candidatos →
+  2.541 clusters novos - total **3.302 clusters / 3.553 membros**, 0 com múltiplas fontes
+  (esperado - só a Apolar coletou até agora; "provar a resolução entre fontes assim que a
+  segunda estiver coletando", seção 11 do prompt de referência, fica pendente até a Chaves na
+  Mão rodar).
+- **Rodado contra as fontes reais - coleta completa da Apolar concluída**: smoke test inicial
+  (5 páginas) validou preço/área/quartos/vagas/condomínio/andar corretos e `territorio_id`
+  resolvido em 5 de 5. Coleta completa (~3.549 páginas de Curitiba, Playwright real, ~3h a
+  3s/req) rodou em background - interrompida a ~929 páginas quando a violação de Raw Zone
+  acima foi encontrada, corrigida, e reiniciada (retomou sozinha via
+  `listar_identificadores_fonte_com_observacao`, sem re-coletar o que já estava em
+  `observacao_anuncio`). **Resultado final: 3.545 de 3.549 páginas coletadas (99,9% -
+  diferença são falhas de renderização isoladas, timeout de 30s, tratadas como não-fatais),
+  96,3% (3.413) com `territorio_id` resolvido** contra `dim_territorio` (bairro já vem no slug
+  da URL da Apolar, sem geocodificação nenhuma). Confirmação explícita do dono do projeto
+  (2026-08-16): a coleta da Apolar pode continuar normalmente, sem esperar resposta ao pedido
+  de autorização
   (seção 6.1/12a do prompt de referência já previa isso como não-bloqueante).
 - **Chaves na Mão: pipeline pronto e testado, mas coleta real ainda não rodou.** O comando
   (`python -m pipelines.ingestion.run_chavesnamao_anuncios`) foi bloqueado pelo classificador
