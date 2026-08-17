@@ -2149,18 +2149,24 @@ fabricar.
 - **Achado real durante a verificação visual, investigado e descartado como não sendo do meu
   código**: a primeira checagem no navegador mostrou o mapa principal em branco (só o fundo
   cinza, sem coroplético nem basemap) tanto em `/anuncios` quanto - crucialmente - em `/imoveis`
-  e `/radar`, duas telas que já funcionavam e que esta sessão não tocou. Investigação (rede,
-  console, WebGL, interceptação do construtor `Worker` - mesma técnica já documentada no
-  checkpoint 9f-9g) não achou nenhum erro: o estilo, os tiles e o worker (`maplibre-gl-worker.mjs`,
-  confirmado presente e servindo `HTTP 200` via `curl`) todos carregavam; o canvas WebGL só não
-  tinha pintado nenhum pixel ainda na hora da checagem. Depois de mais alguns segundos e
-  interações (trocar de aba, abrir um `Select`), o mapa apareceu corretamente nas três telas,
-  com coloração e dado batendo com o esperado (Batel mais escuro/caro, mesma hierarquia já
-  confirmada por FipeZAP no checkpoint 12b) - **conclusão: pintura simplesmente mais lenta que
-  o esperado nesta sessão** (múltiplos restarts de `next dev` e limpeza de cache `.next`
-  aconteceram nela), não um bug de código - mas registrado aqui porque reproduziu de forma
-  consistente o suficiente pra valer a pena documentar, caso apareça de novo numa sessão
-  futura com mais tempo pra investigar a fundo.
+  e `/radar`, duas telas que já funcionavam e que esta sessão não tocou. **Causa raiz real: o
+  bloqueio de recurso cross-origin do próprio `next dev`** (já documentado na memória de sessão
+  sobre o workaround de IP de LAN) - o log do servidor confirmou explicitamente `"Cross-origin
+  access to Next.js dev resources is blocked by default for safety... add it to
+  allowedDevOrigins"` num restart posterior sem o workaround aplicado. O bloqueio é seletivo:
+  o HTML/RSC principal e as chamadas à API (origem diferente, porta 8000) passam normalmente -
+  por isso a manchete e os filtros renderizavam com dado real -, mas o chunk específico do
+  MapLibre (bundle carregado via IP de LAN, origem cruzada com o dev server) ficava bloqueado
+  silenciosamente, sem erro de rede nem de console, deixando só o canvas em branco. A primeira
+  investigação (rede, console, WebGL, interceptação do construtor `Worker`) não achou o
+  bloqueio porque `allowedDevOrigins` **já estava presente** em `next.config.ts` naquele
+  momento da sessão - o mapa "consertou sozinho" ali porque o servidor não recarrega
+  `next.config.ts` sem reiniciar; a config antiga (sem a entrada) só voltou a valer depois de um
+  restart limpo do `next dev`, reproduzindo o branco de novo até a entrada ser restaurada e o
+  servidor reiniciado outra vez. Não é lentidão de pintura nem bug de código - é o mesmo
+  workaround de IP de LAN já registrado nas Notas operacionais, que precisa estar tanto no
+  `next.config.ts` quanto sobreviver ao restart mais recente do servidor para a verificação
+  visual funcionar.
 - Workaround de IP de LAN (ver Notas operacionais) usado pra verificação visual - `next.config.ts`
   revertido antes de finalizar (nunca foi commitado antes, dev-only).
 - **Rodado contra o banco/API/frontend reais**: `/anuncios` renderiza a manchete, os três
