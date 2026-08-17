@@ -938,3 +938,170 @@ export function getQualidadeDados(): Promise<QualidadeDados> {
     ultimaAtualizacao: r.ultima_atualizacao,
   }));
 }
+
+// Radar de Anúncios (checkpoint 12i) - estoque/preço são reais (snapshot
+// atual); quadrante fica sempre null hoje (baseline histórica ainda não
+// existe, ver checkpoint 12f/12g) - motivoIndisponivelQuadrante explica
+// por quê, nunca um campo null em silêncio.
+export type TermometroBairro = {
+  territorioId: string;
+  estoque: number;
+  precoMediano: number | null;
+  precoP25: number | null;
+  precoP75: number | null;
+  precoM2Mediano: number | null;
+  amostraPrecoSuficiente: boolean;
+  quadrante: string | null;
+  motivoIndisponivelQuadrante: string;
+};
+
+type TermometroBairroApi = {
+  territorio_id: string;
+  estoque: number;
+  preco_mediano: number | null;
+  preco_p25: number | null;
+  preco_p75: number | null;
+  preco_m2_mediano: number | null;
+  amostra_preco_suficiente: boolean;
+  quadrante: string | null;
+  motivo_indisponivel_quadrante: string;
+};
+
+function mapTermometroBairro(r: TermometroBairroApi): TermometroBairro {
+  return {
+    territorioId: r.territorio_id,
+    estoque: r.estoque,
+    precoMediano: r.preco_mediano,
+    precoP25: r.preco_p25,
+    precoP75: r.preco_p75,
+    precoM2Mediano: r.preco_m2_mediano,
+    amostraPrecoSuficiente: r.amostra_preco_suficiente,
+    quadrante: r.quadrante,
+    motivoIndisponivelQuadrante: r.motivo_indisponivel_quadrante,
+  };
+}
+
+export function getTermometroAnuncios(
+  operacao: string,
+  tipologia?: string,
+): Promise<TermometroBairro[]> {
+  return fetchJson<TermometroBairroApi[]>("/anuncios/termometro", {
+    operacao,
+    tipologia,
+  }).then((linhas) => linhas.map(mapTermometroBairro));
+}
+
+export type ResumoBairroAnuncio = {
+  territorioId: string;
+  operacao: string;
+  tipologia: string | null;
+  estoque: number;
+  precoMediano: number | null;
+  precoP25: number | null;
+  precoP75: number | null;
+  precoM2Mediano: number | null;
+  amostraPrecoSuficiente: boolean;
+  variacaoPreco12mPct: number | null;
+  motivoIndisponivelVariacao: string;
+  estoqueVariacaoPct: number | null;
+  motivoIndisponivelEstoqueVariacao: string;
+  permanenciaMedianaDias: number | null;
+  motivoIndisponivelPermanencia: string;
+  quadrante: string | null;
+  motivoIndisponivelQuadrante: string;
+  leituraCruzadaDefasagemMeses: number | null;
+  motivoIndisponivelLeituraCruzada: string;
+  construcaoAlvarasAprovados: number | null;
+  construcaoCvcosConcluidos: number | null;
+  valorVenalM2Mediano: number | null;
+};
+
+type ResumoBairroAnuncioApi = {
+  territorio_id: string;
+  operacao: string;
+  tipologia: string | null;
+  estoque: number;
+  preco_mediano: number | null;
+  preco_p25: number | null;
+  preco_p75: number | null;
+  preco_m2_mediano: number | null;
+  amostra_preco_suficiente: boolean;
+  variacao_preco_12m_pct: number | null;
+  motivo_indisponivel_variacao: string;
+  estoque_variacao_pct: number | null;
+  motivo_indisponivel_estoque_variacao: string;
+  permanencia_mediana_dias: number | null;
+  motivo_indisponivel_permanencia: string;
+  quadrante: string | null;
+  motivo_indisponivel_quadrante: string;
+  leitura_cruzada_defasagem_meses: number | null;
+  motivo_indisponivel_leitura_cruzada: string;
+  construcao_alvaras_aprovados: number | null;
+  construcao_cvcos_concluidos: number | null;
+  valor_venal_m2_mediano: number | null;
+};
+
+export function getResumoBairroAnuncio(
+  territorioId: string,
+  operacao: string,
+  tipologia?: string,
+): Promise<ResumoBairroAnuncio> {
+  return fetchJson<ResumoBairroAnuncioApi>(`/anuncios/bairros/${territorioId}/resumo`, {
+    operacao,
+    tipologia,
+  }).then((r) => ({
+    territorioId: r.territorio_id,
+    operacao: r.operacao,
+    tipologia: r.tipologia,
+    estoque: r.estoque,
+    precoMediano: r.preco_mediano,
+    precoP25: r.preco_p25,
+    precoP75: r.preco_p75,
+    precoM2Mediano: r.preco_m2_mediano,
+    amostraPrecoSuficiente: r.amostra_preco_suficiente,
+    variacaoPreco12mPct: r.variacao_preco_12m_pct,
+    motivoIndisponivelVariacao: r.motivo_indisponivel_variacao,
+    estoqueVariacaoPct: r.estoque_variacao_pct,
+    motivoIndisponivelEstoqueVariacao: r.motivo_indisponivel_estoque_variacao,
+    permanenciaMedianaDias: r.permanencia_mediana_dias,
+    motivoIndisponivelPermanencia: r.motivo_indisponivel_permanencia,
+    quadrante: r.quadrante,
+    motivoIndisponivelQuadrante: r.motivo_indisponivel_quadrante,
+    leituraCruzadaDefasagemMeses: r.leitura_cruzada_defasagem_meses,
+    motivoIndisponivelLeituraCruzada: r.motivo_indisponivel_leitura_cruzada,
+    construcaoAlvarasAprovados: r.construcao_alvaras_aprovados,
+    construcaoCvcosConcluidos: r.construcao_cvcos_concluidos,
+    valorVenalM2Mediano: r.valor_venal_m2_mediano,
+  }));
+}
+
+export type ProcedenciaFonte = {
+  fonteId: string;
+  cadencia: string;
+  ultimaAtualizacao: string | null;
+  totalObservadoNoPeriodo: number;
+  taxaClassificacaoTipologia: number | null;
+  taxaResolucaoBairro: number | null;
+};
+
+type ProcedenciaFonteApi = {
+  fonte_id: string;
+  cadencia: string;
+  ultima_atualizacao: string | null;
+  total_observado_no_periodo: number;
+  taxa_classificacao_tipologia: number | null;
+  taxa_resolucao_bairro: number | null;
+};
+
+export function getProcedenciaAnuncios(): Promise<ProcedenciaFonte[]> {
+  return fetchJson<ProcedenciaFonteApi[]>("/anuncios/procedencia").then((linhas) =>
+    linhas.map((r) => ({
+      fonteId: r.fonte_id,
+      cadencia: r.cadencia,
+      ultimaAtualizacao: r.ultima_atualizacao,
+      totalObservadoNoPeriodo: r.total_observado_no_periodo,
+      taxaClassificacaoTipologia: r.taxa_classificacao_tipologia,
+      taxaResolucaoBairro: r.taxa_resolucao_bairro,
+    })),
+  );
+}

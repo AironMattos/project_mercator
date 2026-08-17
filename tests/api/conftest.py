@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,6 +38,21 @@ from infrastructure.database.orm.zoneamento_territorial import ZoneamentoTerrito
 
 # Modelo importado só pra registrar em Base.metadata antes do create_all.
 from infrastructure.database.orm import pipeline_run  # noqa: F401
+
+# Radar de Anúncios (checkpoint 12i) - modelos novos, seed própria mais
+# abaixo. observacao_anuncio.py já se auto-importa (entidade/territorio/
+# dim_tipologia_imovel, achado do checkpoint 12f) - só falta registrar
+# termometro_anuncio (não usado pela interface, que lê ao vivo, mas
+# precisa existir em Base.metadata pro create_all não deixar a tabela de
+# fora caso outro código a referencie no futuro).
+from infrastructure.database.orm.observacao_anuncio import (  # noqa: F401
+    ImovelResolvido,
+    ImovelResolvidoMembro,
+    ObservacaoAnuncio,
+)
+from infrastructure.database.orm.dim_tipologia_imovel import DimTipologiaImovel
+from infrastructure.database.orm import termometro_anuncio  # noqa: F401
+from infrastructure.database.orm.pipeline_run import PipelineRun
 
 ADMIN_DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -585,6 +600,122 @@ def seeded_session(test_engine):
                 domicilios_total=300, domicilios_particulares_ocupados=280,
                 domicilios_particulares_vagos=20, ano_referencia=2022,
                 fonte_id="ibge_censo_setor", snapshot_ref="teste",
+            ),
+        ]
+    )
+
+    # Radar de Anúncios (checkpoint 12i) - 5 aluguéis em Batel (mediana
+    # conhecida) + 2 vendas em Centro, cada um resolvido em seu próprio
+    # cluster (imovel_resolvido) - suficiente pra exercitar termômetro/
+    # resumo de bairro/procedência sem tentar reproduzir volume real.
+    session.add_all(
+        [
+            DimTipologiaImovel(tipologia_id="apartamento", nome="Apartamento"),
+            DimTipologiaImovel(tipologia_id="nao_classificado", nome="Não classificado"),
+        ]
+    )
+
+    entidades_anuncio: list[Entidade] = []
+    observacoes_anuncio: list[ObservacaoAnuncio] = []
+    clusters_anuncio: list[ImovelResolvido] = []
+    membros_anuncio: list[ImovelResolvidoMembro] = []
+
+    # 30 listagens (não 5) - o piso mínimo de amostra da seção 2.2
+    # (PISO_MINIMO_AMOSTRA em anuncio_termometro.py) é 30; menos que isso
+    # e a mediana fica None de propósito, então o cenário de teste
+    # precisa bater o piso pra exercitar o caminho "amostra suficiente".
+    # Preços 1000..1290 de 10 em 10 - mediana de 30 pontos = média dos
+    # dois centrais (1140+1150)/2 = 1145.0, valor fácil de conferir.
+    precos_batel = [1000.0 + i * 10 for i in range(30)]
+    for i, preco in enumerate(precos_batel):
+        entidade_id = uuid.uuid4()
+        cluster_id = uuid.uuid4()
+        impressao = f"fp-batel-{i}"
+        entidades_anuncio.append(
+            Entidade(
+                entidade_id=entidade_id,
+                tipo_entidade="anuncio_imovel",
+                identificador_fonte=f"apolar-batel-{i}",
+            )
+        )
+        observacoes_anuncio.append(
+            ObservacaoAnuncio(
+                entidade_id=entidade_id,
+                observado_em=date(2026, 8, 16),
+                operacao="aluguel",
+                tipologia="apartamento",
+                territorio_id="curitiba-bairro-batel",
+                preco=preco,
+                area_util_m2=50.0,
+                quartos=2,
+                banheiros=1,
+                vagas=1,
+                andar=3,
+                impressao_digital=impressao,
+                fonte_id="apolar_anuncios",
+                snapshot_ref="teste",
+            )
+        )
+        clusters_anuncio.append(ImovelResolvido(cluster_id=cluster_id, impressao_digital=impressao))
+        membros_anuncio.append(
+            ImovelResolvidoMembro(
+                entidade_id=entidade_id, cluster_id=cluster_id, fonte_id="apolar_anuncios"
+            )
+        )
+
+    for i, preco in enumerate([300000.0, 350000.0]):
+        entidade_id = uuid.uuid4()
+        cluster_id = uuid.uuid4()
+        impressao = f"fp-centro-{i}"
+        entidades_anuncio.append(
+            Entidade(
+                entidade_id=entidade_id,
+                tipo_entidade="anuncio_imovel",
+                identificador_fonte=f"chaves-centro-{i}",
+            )
+        )
+        observacoes_anuncio.append(
+            ObservacaoAnuncio(
+                entidade_id=entidade_id,
+                observado_em=date(2026, 8, 16),
+                operacao="venda",
+                tipologia="apartamento",
+                territorio_id="curitiba-bairro-centro",
+                preco=preco,
+                area_util_m2=60.0,
+                quartos=2,
+                banheiros=1,
+                vagas=1,
+                andar=5,
+                impressao_digital=impressao,
+                fonte_id="chavesnamao_anuncios",
+                snapshot_ref="teste",
+            )
+        )
+        clusters_anuncio.append(ImovelResolvido(cluster_id=cluster_id, impressao_digital=impressao))
+        membros_anuncio.append(
+            ImovelResolvidoMembro(
+                entidade_id=entidade_id, cluster_id=cluster_id, fonte_id="chavesnamao_anuncios"
+            )
+        )
+
+    session.add_all(entidades_anuncio)
+    session.flush()
+    session.add_all(observacoes_anuncio)
+    session.add_all(clusters_anuncio)
+    session.flush()
+    session.add_all(membros_anuncio)
+
+    agora = datetime.now(timezone.utc)
+    session.add_all(
+        [
+            PipelineRun(
+                conector_id="apolar_anuncios", iniciado_em=agora, finalizado_em=agora,
+                status="sucesso", registros_lidos=30, registros_gravados=30, registros_com_falha=0,
+            ),
+            PipelineRun(
+                conector_id="chavesnamao_anuncios", iniciado_em=agora, finalizado_em=agora,
+                status="sucesso", registros_lidos=2, registros_gravados=2, registros_com_falha=0,
             ),
         ]
     )

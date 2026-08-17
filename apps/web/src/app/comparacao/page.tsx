@@ -118,6 +118,9 @@ export default function ComparacaoPage() {
           <Link href="/imoveis" className="text-sm text-muted-foreground underline underline-offset-2">
             Radar Imobiliário
           </Link>
+          <Link href="/anuncios" className="text-sm text-muted-foreground underline underline-offset-2">
+            Radar de Anúncios
+          </Link>
           <Link href="/metodologia" className="text-sm text-muted-foreground underline underline-offset-2">
             Metodologia
           </Link>

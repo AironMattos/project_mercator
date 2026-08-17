@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import (
+    anuncios,
     bairros,
     busca_raio,
     categorias,
@@ -57,6 +58,7 @@ app.include_router(busca_raio.router)
 app.include_router(metodologia.router)
 app.include_router(sinais.router)
 app.include_router(imoveis.router)
+app.include_router(anuncios.router)
 
 
 @app.get("/health")

@@ -67,6 +67,8 @@ const MOTIVOS_LEGIVEIS: Record<string, string> = {
   baseline_zero: "sem histórico de comparação",
   mes_incompleto: "mês ainda sem cobertura completa",
   nao_aplicavel_sem_territorio_id: "não aplicável",
+  amostra_insuficiente: "amostra insuficiente",
+  sem_dado: "sem dado suficiente",
 };
 
 export function motivoIndisponivelLegivel(motivo: string | null): string {

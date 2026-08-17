@@ -6,7 +6,8 @@ import { buttonVariants } from "@/components/ui/button";
 // mais num mapa sem contexto nenhum. Não é elaborada de propósito (a spec
 // só pede que exista): nome, uma frase de posicionamento e um CTA por
 // produto. Segundo CTA (checkpoint 11f) adicionado quando o Radar
-// Imobiliário passou a ter frontend próprio - os dois produtos leem o
+// Imobiliário passou a ter frontend próprio, terceiro (checkpoint 12i)
+// quando o Radar de Anúncios ganhou o dele - os três produtos leem o
 // mesmo substrato de eventos, mas são experiências distintas.
 export default function Home() {
   return (
@@ -33,6 +34,12 @@ export default function Home() {
           className={buttonVariants({ variant: "secondary", size: "lg", className: "px-8 text-base" })}
         >
           Radar Imobiliário
+        </Link>
+        <Link
+          href="/anuncios"
+          className={buttonVariants({ variant: "secondary", size: "lg", className: "px-8 text-base" })}
+        >
+          Radar de Anúncios
         </Link>
       </div>
     </main>

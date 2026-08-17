@@ -218,6 +218,12 @@ export function Dashboard() {
             Radar Imobiliário
           </Link>
           <Link
+            href="/anuncios"
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Radar de Anúncios
+          </Link>
+          <Link
             href="/metodologia"
             className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
           >

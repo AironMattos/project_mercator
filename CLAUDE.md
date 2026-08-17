@@ -2085,6 +2085,103 @@ grava nada, sem endpoint/tela ainda).
   **449 testes Python passando**. `alembic check` sem drift novo (nenhuma tabela nova - tudo
   lido ao vivo ou de tabelas já existentes).
 
+### Checkpoint 12i - Interface: **concluído para o que dado real sustenta hoje**
+
+Primeiro checkpoint desta fase a tocar `apps/api`/`apps/web`. Seção 10 do prompt de referência -
+adaptada à mesma realidade de dado documentada nos checkpoints 12e-12h: quadrante de
+aquecimento, variação de preço/estoque, permanência mediana e leitura cruzada por bairro ficam
+`None` em toda tela hoje (dependem de baseline histórica que só existe depois de mais
+snapshots semanais reais) - a interface declara isso explicitamente em vez de esconder ou
+fabricar.
+
+- **Backend** (`apps/api/routers/anuncios.py`, novo) - três endpoints:
+  - `GET /anuncios/termometro?operacao=...&tipologia=...` - estoque e preço pedido (mediana/
+    P25/P75) por bairro, base do mapa. Lê **ao vivo** de `consultar_estoque_e_precos_ativos`
+    (checkpoint 12f), não da tabela materializada `analytics.termometro_anuncio` - achado de
+    desenho: mediana não soma entre tipologias, então "todos os tipos" precisa recalcular do
+    preço bruto, não somar medianas já calculadas por célula (`anuncio_interface_repository.py`,
+    novo).
+  - `GET /anuncios/bairros/{id}/resumo` - painel de bairro, reaproveita `consultar_metricas_construcao`/
+    `consultar_valor_venal_mediano_por_bairro` (Radar Imobiliário) pro contexto, em vez de
+    duplicar essas consultas.
+  - `GET /anuncios/procedencia` - Apolar e Chaves na Mão sempre separadas (seção 1.2).
+  - **Achado real, corrigido antes de rodar os testes de API**: `contexto_censo_repository.
+    consultar_agregado_por_bairro` precisou ganhar `domicilios_particulares_vagos` na agregação
+    (checkpoint 12h) - a extensão é aditiva e `CensoBairroOut` ignora chaves extras por padrão
+    do Pydantic, mas só ficou confirmado seguro rodando os 12 testes existentes de
+    `/imoveis/contexto` antes de seguir, não por suposição.
+  - `tests/api/conftest.py` ganhou seed própria de anúncio (30 aluguéis em Batel - o piso
+    mínimo de amostra da seção 2.2 exigiu pelo menos 30 pontos pra exercitar o caminho "amostra
+    suficiente" em teste, 5 não bastava - e 2 vendas em Centro pra exercitar "amostra
+    insuficiente" e "bairro sem estoque"). 9 testes novos (`tests/api/test_anuncios.py`).
+- **Frontend** (`apps/web/src/app/anuncios/`, `components/anuncios-*.tsx`, novo) - reaproveita
+  pesadamente a biblioteca de componentes já existente do Radar Imobiliário
+  (`ImoveisChoroplethMap`, `SequentialLegend`, `FatoTile`, `Headline`, `MethodologyTooltip`) -
+  nenhum componente de mapa/legenda escrito do zero.
+  - Mapa colorido por **preço pedido mediano** (rampa sequencial), não pelo quadrante de
+    aquecimento que a seção 10 pede - o quadrante depende de baseline que não existe pra
+    nenhum bairro ainda (mesmo bloqueio dos checkpoints 12f/12g); a legenda diz isso
+    explicitamente ("quadrante de aquecimento aparece aqui assim que houver histórico
+    suficiente"), nunca finge a coloração pretendida.
+  - **Terceira correção da seção 10 implementada desde o início** (não como correção depois):
+    a legenda declara quantos bairros ficaram de fora por amostra insuficiente ("42 de 72
+    bairros... os outros 30 aparecem em cinza").
+  - **Primeira correção da seção 10 implementada desde o início**: no painel de bairro, cada
+    métrica indisponível (variação 12m, variação de estoque, permanência, quadrante, leitura
+    cruzada) é uma linha de texto discreta com o motivo, nunca um `FatoTile` de peso visual
+    cheio fingindo ter dado - o padrão que a seção 10 pede pra tirar do resto do produto entrou
+    aqui já correto, em vez de precisar de uma correção futura (mesma classe de bug já
+    registrada nos checkpoints 10d/11f do Radar Imobiliário, que regrediu uma vez).
+  - **Segunda correção da seção 10 aplicada ao contexto de construção**: "valor venal mediano
+    (PGV)" vem com o rótulo "referência para IPTU, não é preço de mercado" ao lado do número,
+    visível, não em tooltip.
+  - Só três dos quatro controles da seção 10 (operação/tipo de imóvel/bairro) - "período" fica
+    de fora de propósito: o termômetro é um snapshot do estoque agora, não uma série filtrável
+    por data ainda (mesma simplificação já usada nas abas Valor de referência/Zoneamento do
+    Radar Imobiliário, que também não são série temporal).
+  - Manchete editorial computada com dado real (nunca fabricado): "5.004 imóveis para alugar
+    anunciados agora em Curitiba, com preço mediano confiável em 42 de 72 bairros" - não o
+    "8% acima de um ano atrás" do exemplo do prompt de referência, que exigiria uma variação
+    que não existe ainda.
+  - Navegação cruzada: link "Radar de Anúncios" adicionado ao cabeçalho do Radar de Comércio,
+    do Radar Imobiliário e de `/comparacao`; terceiro CTA em `/` - mesmo padrão já estabelecido
+    no checkpoint 11f quando o Radar Imobiliário ganhou frontend próprio.
+- **Achado real durante a verificação visual, investigado e descartado como não sendo do meu
+  código**: a primeira checagem no navegador mostrou o mapa principal em branco (só o fundo
+  cinza, sem coroplético nem basemap) tanto em `/anuncios` quanto - crucialmente - em `/imoveis`
+  e `/radar`, duas telas que já funcionavam e que esta sessão não tocou. Investigação (rede,
+  console, WebGL, interceptação do construtor `Worker` - mesma técnica já documentada no
+  checkpoint 9f-9g) não achou nenhum erro: o estilo, os tiles e o worker (`maplibre-gl-worker.mjs`,
+  confirmado presente e servindo `HTTP 200` via `curl`) todos carregavam; o canvas WebGL só não
+  tinha pintado nenhum pixel ainda na hora da checagem. Depois de mais alguns segundos e
+  interações (trocar de aba, abrir um `Select`), o mapa apareceu corretamente nas três telas,
+  com coloração e dado batendo com o esperado (Batel mais escuro/caro, mesma hierarquia já
+  confirmada por FipeZAP no checkpoint 12b) - **conclusão: pintura simplesmente mais lenta que
+  o esperado nesta sessão** (múltiplos restarts de `next dev` e limpeza de cache `.next`
+  aconteceram nela), não um bug de código - mas registrado aqui porque reproduziu de forma
+  consistente o suficiente pra valer a pena documentar, caso apareça de novo numa sessão
+  futura com mais tempo pra investigar a fundo.
+- Workaround de IP de LAN (ver Notas operacionais) usado pra verificação visual - `next.config.ts`
+  revertido antes de finalizar (nunca foi commitado antes, dev-only).
+- **Rodado contra o banco/API/frontend reais**: `/anuncios` renderiza a manchete, os três
+  filtros, o mapa (coroplético + legenda com contagem de amostra insuficiente), o painel de
+  bairro (Batel: R$6.950,00 mediano, 246 em estoque, faixa P25-P75 R$3.500,00-R$12.740,30, 30
+  alvarás/13 CVCOs/R$4.912,64 de contexto) e o painel de procedência (Apolar 3.545 observados/
+  94,2% tipologia/96,3% bairro; Chaves na Mão 5.013/87,7%/95,9%) - todos com dado real,
+  conferidos um a um no navegador. `npm run build`/`lint`/`tsc` limpos.
+- 9 testes novos de API. Total do projeto: **458 testes Python passando**.
+
+**Radar de Anúncios (checkpoints 12a-12i) concluído** - as três fontes (Apolar, Chaves na Mão,
+FipeZAP) coletando, o ciclo de vida do anúncio (`ANUNCIO_PUBLICADO`/`PRECO_ALTERADO`/
+`ANUNCIO_ENCERRADO`/`REANUNCIO`) funcionando, termômetro/leitura cruzada/pressão especulativa
+implementados e testados, interface própria em `/anuncios`. **O que ainda depende só de tempo
+de calendário passando, não de código**: baseline histórica (3+ meses) pra variação/quadrante/
+rotação/permanência/leitura cruzada por bairro virarem números reais em vez de "amostra
+insuficiente" - precisa de snapshots semanais reais se acumulando, documentado desde o
+checkpoint 12e e não escondido em nenhuma tela. Dois gaps reais que dependem de decisão do dono
+do projeto, não de tempo: `ofertante_hash` nunca populado pelos conectores (checkpoint 12h) e
+calibração contra ONR bloqueada por a fonte não publicar o dado em CSV (checkpoint 12e).
+
 ## Notas operacionais
 
 - Ambiente Python único disponível na máquina é 3.14 (via `py -0p`); todas as dependências

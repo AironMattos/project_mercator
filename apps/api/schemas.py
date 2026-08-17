@@ -372,3 +372,72 @@ class QualidadeDadosImoveisOut(BaseModel):
     pgv_bairros_cobertos: int
     pgv_total_registros: int
     ultima_atualizacao_por_fonte: dict[str, datetime | None]
+
+
+class TermometroBairroOut(BaseModel):
+    """Uma linha do termômetro por bairro (checkpoint 12i, seção 2/10 do
+    prompt de referência do Radar de Anúncios) - estoque e preço são
+    reais (snapshot atual); `quadrante` fica sempre `None` hoje porque
+    depende de baseline histórica que ainda não existe (ver
+    checkpoint 12f/12g) - `motivo_indisponivel_quadrante` explica por
+    quê, nunca um campo `None` em silêncio."""
+
+    territorio_id: str
+    estoque: int
+    preco_mediano: float | None
+    preco_p25: float | None
+    preco_p75: float | None
+    preco_m2_mediano: float | None
+    amostra_preco_suficiente: bool
+    quadrante: str | None = None
+    motivo_indisponivel_quadrante: str = "historico_insuficiente"
+
+
+class ResumoBairroAnuncioOut(BaseModel):
+    """Painel de bairro do Radar de Anúncios (checkpoint 12i) - ordem dos
+    campos aqui não importa pro schema, mas importa pra UI (seção 10:
+    "preço mediano → variação 12m → estoque e sua variação → permanência
+    mediana → quadrante → leitura cruzada → contexto de construção/valor
+    venal"). Cada métrica indisponível vem com seu próprio motivo, nunca
+    um None mudo."""
+
+    territorio_id: str
+    operacao: str
+    tipologia: str | None
+
+    estoque: int
+    preco_mediano: float | None
+    preco_p25: float | None
+    preco_p75: float | None
+    preco_m2_mediano: float | None
+    amostra_preco_suficiente: bool
+
+    variacao_preco_12m_pct: float | None = None
+    motivo_indisponivel_variacao: str = "historico_insuficiente"
+    estoque_variacao_pct: float | None = None
+    motivo_indisponivel_estoque_variacao: str = "historico_insuficiente"
+    permanencia_mediana_dias: float | None = None
+    motivo_indisponivel_permanencia: str = "historico_insuficiente"
+    quadrante: str | None = None
+    motivo_indisponivel_quadrante: str = "historico_insuficiente"
+    leitura_cruzada_defasagem_meses: int | None = None
+    motivo_indisponivel_leitura_cruzada: str = "amostra_insuficiente"
+
+    construcao_alvaras_aprovados: int | None
+    construcao_cvcos_concluidos: int | None
+    valor_venal_m2_mediano: float | None
+
+
+class ProcedenciaFonteOut(BaseModel):
+    """Painel de procedência ampliado (checkpoint 12i, seção 10) - por
+    fonte: última atualização, cadência, volume observado no período e
+    as duas taxas de qualidade (classificação de tipologia, resolução de
+    bairro), separado por Apolar e por Chaves na Mão - nunca uma média
+    silenciosa entre as duas (seção 1.2)."""
+
+    fonte_id: str
+    cadencia: str
+    ultima_atualizacao: datetime | None
+    total_observado_no_periodo: int
+    taxa_classificacao_tipologia: float | None
+    taxa_resolucao_bairro: float | None
